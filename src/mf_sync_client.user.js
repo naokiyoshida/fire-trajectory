@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         fire-trajectory-sync-client
 // @namespace    http://tampermonkey.net/
-// @version      3.18
-// @description  Money Forward MEのデータをGASへ自動同期します。(URL強制遷移/ページリロード型)
+// @version      3.19
+// @description  Money Forward MEのデータをGASへ自動同期します。(URL強制遷移/ページリロード型/高信頼性版)
 // @author       Naoki Yoshida
 // @match        https://moneyforward.com/cf*
 // @downloadURL  https://raw.githubusercontent.com/naokiyoshida/fire-trajectory/main/src/mf_sync_client.user.js
@@ -150,6 +150,7 @@
             nextUrl.pathname = '/cf'; // 詳細一覧ページパスを強制
             nextUrl.searchParams.set('year', currentTarget.year);
             nextUrl.searchParams.set('month', currentTarget.month);
+            nextUrl.searchParams.set('_t', Date.now()); // キャッシュバスター
 
             // ページ遷移 (ここでスクリプトは終了し、ロード後に再開)
             window.location.href = nextUrl.toString();
@@ -176,8 +177,8 @@
 
         if (activeSelector) {
             const currentBody = document.querySelector(activeSelector);
-            // URL由来の年(currentTarget.year)を正として使用
-            const pageData = scrapeFromElement(currentBody, currentTarget.year.toString());
+            // URL由来の年(currentTarget.year)を正として使用 ＋ 月の一致チェック
+            const pageData = scrapeFromElement(currentBody, currentTarget.year.toString(), currentTarget.month);
             console.log(`【Scrape】${currentTarget.year}/${currentTarget.month}: ${pageData.length} items found.`);
 
             // データを結合
@@ -234,8 +235,8 @@
         });
     };
 
-    // スクレイピング関数 (yearOverride対応)
-    const scrapeFromElement = (element, yearOverride) => {
+    // スクレイピング関数 (yearOverride対応 + 月一致チェック)
+    const scrapeFromElement = (element, yearOverride, targetMonth) => {
         const rows = element.querySelectorAll('tr');
         const data = [];
         const pageYear = yearOverride;
@@ -267,6 +268,13 @@
                 if (dateMatch) {
                     const m = dateMatch[1].padStart(2, '0');
                     const d = dateMatch[2].padStart(2, '0');
+
+                    // 月の一致チェック: ターゲット月が指定されている場合、一致しなければスキップ
+                    if (targetMonth && parseInt(m, 10) !== parseInt(targetMonth, 10)) {
+                        // console.warn(`【Skip】Month mismatch. Target: ${targetMonth}, Found: ${m}`);
+                        return; // forEach内のreturnはcontinueと同じ
+                    }
+
                     date = `${pageYear}/${m}/${d}`;
                 }
                 const amount = amountRaw.replace(/[,円\s]/g, '');
