@@ -1,0 +1,16 @@
+# --- fire-trajectory Secret ---
+# GASのURLを含む設定ファイルを除外
+src/fire-config.js
+
+# 設定の雛形は共有対象に含める
+!src/fire-config.js.sample
+
+# clasp secret
+.clasp.json
+
+# --- System & Temporary Files ---
+*.csv
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/

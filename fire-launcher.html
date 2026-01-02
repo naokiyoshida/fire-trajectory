@@ -1,0 +1,34 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <title>fire-trajectory Launcher</title>
+</head>
+<body style="font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; text-align: center; padding-top: 100px; background: #f4f4f9;">
+    <div style="background: white; display: inline-block; padding: 40px; border-radius: 10px; box-shadow: 0 4px 10px rgba(0,0,0,0.1);">
+        <h2 style="color: #2e7d32;">🚀 fire-trajectory</h2>
+        <p style="color: #666;">マネーフォワードを起動して同期を開始します...</p>
+        <p style="font-size: 0.8em; color: #999;">このウィンドウは自動的に閉じます。</p>
+    </div>
+
+    <script>
+        // マネーフォワードの入出金画面を「子ウィンドウ」として開く
+        const targetUrl = 'https://moneyforward.com/cf';
+        const child = window.open(targetUrl, '_blank');
+
+        if (child) {
+            // 子ウィンドウの起動に成功したら、自身（ランチャー）は役目を終える
+            setTimeout(() => {
+                window.open('', '_self', '');
+                window.close();
+            }, 2000);
+        } else {
+            // ポップアップブロック時のフォールバック
+            document.body.innerHTML = `
+                <h2 style="color: #d32f2f;">⚠️ ポップアップがブロックされました</h2>
+                <p>ブラウザの設定で "file:///" からのポップアップを許可してください。</p>
+            `;
+        }
+    </script>
+</body>
+</html>
