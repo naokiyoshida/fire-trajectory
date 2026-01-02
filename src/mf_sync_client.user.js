@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         fire-trajectory-sync-client
 // @namespace    http://tampermonkey.net/
-// @version      3.0
+// @version      3.1
 // @description  Money Forward MEのデータをGASへ自動同期します。Adaptive Syncにより初回52ヶ月/通常6ヶ月を自動判別。
 // @author       Naoki Yoshida
 // @match        https://moneyforward.com/cf*
@@ -112,6 +112,8 @@
                 },
                 data: options.body,
                 onload: (response) => {
+                    // Google Apps Script redirects (302) are handled automatically by GM_xmlhttpRequest usually,
+                    // but sometimes we get login pages (200 OK with HTML) if permissions are wrong.
                     if (response.status >= 200 && response.status < 300) {
                         resolve(response);
                     } else {
@@ -289,8 +291,17 @@
                 body: JSON.stringify({ action: "get_sync_config" })
             });
 
-            // GM_xmlhttpRequestのレスポンスは .json() メソッドを持たないのでパースが必要
-            const syncSettings = JSON.parse(resConfig.responseText);
+            let syncSettings;
+            try {
+                syncSettings = JSON.parse(resConfig.responseText);
+            } catch (e) {
+                console.error("Invalid Response:", resConfig.responseText.slice(0, 500));
+                if (resConfig.responseText.trim().startsWith('<')) {
+                    throw new Error("GASからHTMLが返されました。\n【重要】GASのデプロイ設定で「アクセスできるユーザー」を「全員 (Anyone)」に設定してください。\n「自分のみ」では外部スクリプトからアクセスできません。");
+                }
+                throw new Error("GASからの応答が不正です (JSONパースエラー)");
+            }
+
             if (syncSettings.status === 'error') throw new Error(syncSettings.message);
 
             showStatus(`モード: ${syncSettings.mode} で同期開始`);
@@ -302,7 +313,7 @@
             for (let i = 0; i < monthsToSync; i++) {
                 showStatus(`データ取得中: ${i + 1}ヶ月目`);
 
-                if (i > 0) await new Promise(r => setTimeout(r, 2000)); // 待ち時間を少し延長
+                if (i > 0) await new Promise(r => setTimeout(r, 2000));
 
                 const data = scrapeCurrentPage();
                 console.log(`Month ${i + 1}: ${data.length} items found.`);
@@ -356,7 +367,15 @@
                     method: "POST",
                     body: JSON.stringify({ action: "sync_data", data: uniqueData })
                 });
-                const result = JSON.parse(resSync.responseText);
+
+                let result;
+                try {
+                    result = JSON.parse(resSync.responseText);
+                } catch (e) {
+                    console.error("Invalid Response (Sync):", resSync.responseText.slice(0, 500));
+                    throw new Error("データ送信後の応答が不正です。GAS側でエラーの可能性があります。");
+                }
+
                 if (result.status === 'error') throw new Error(result.message);
                 showStatus(`完了: ${result.count}件同期しました`, 5000);
                 setTimeout(() => { window.close(); }, 3000);
