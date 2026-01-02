@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         fire-trajectory-sync-client
 // @namespace    http://tampermonkey.net/
-// @version      3.13
+// @version      3.14
 // @description  Money Forward MEのデータをGASへ自動同期します。Adaptive Syncにより初回52ヶ月/通常6ヶ月を自動判別。
 // @author       Naoki Yoshida
 // @match        https://moneyforward.com/cf*
@@ -184,7 +184,7 @@
         });
     };
 
-    // DOM診断用関数
+    // DOM診断用関数 (デバッグ用)
     const diagnoseDOM = () => {
         console.group("【fire-trajectory】DOM診断レポート");
         console.log("URL:", window.location.href);
@@ -212,6 +212,7 @@
         console.groupEnd();
     };
 
+    // --- メイン処理 ---
     async function runSync(forceFull = false) {
         showStatus("同期プロセスを開始...");
         console.log("【fire-trajectory】同期プロセスを開始します...");
@@ -229,6 +230,7 @@
             }
         }
 
+        // 対象テーブルの検出
         let activeSelector = null;
         try {
             const result = await waitForSyncTarget(5000);
@@ -263,7 +265,7 @@
             return scrapeFromElement(currentBody);
         };
 
-        // ページから年を取得する関数
+        // ページから年を取得する関数 (強化版)
         const getYearFromPage = () => {
             // Check 1: URL Parameter (Standard)
             const urlParams = new URLSearchParams(window.location.search);
@@ -273,20 +275,41 @@
                 return y;
             }
 
-            // Check 2: Calendar Title Header
-            const headerTitle = document.querySelector('.fc-header-title');
-            if (headerTitle) {
-                const text = headerTitle.innerText.replace(/\s+/g, '');
-                const match = text.match(/(\d{4})年/);
-                if (match) {
-                    console.log(`【Debug】Date extraction: Header title found: ${match[1]}`);
-                    return match[1];
+            // Check 2: Calendar Title Header / Commonly used date displays
+            // Look for any element that looks like a header containing "YYYY年MM月"
+            const headerSelectors = [
+                '.fc-header-title',
+                '.transaction-range-display',
+                'h1', 'h2', 'h3',
+                '.heading-date',
+                '.page-header-title',
+                '#term_header',
+                '.term',
+                '#transaction_list_caption' // Some layouts use this
+            ];
+
+            for (const sel of headerSelectors) {
+                const els = document.querySelectorAll(sel);
+                for (const el of els) {
+                    // Remove whitespace to make matching easier
+                    const text = el.innerText.replace(/\s+/g, '');
+                    // Match "2024年12月" or just "2024年" if unambiguous
+                    const match = text.match(/(\d{4})年(\d{1,2})月/);
+                    if (match) {
+                        console.log(`【Debug】Date extraction: Header found (${sel}): ${match[1]}年${match[2]}月`);
+                        return match[1];
+                    }
+
+                    // Year-only match (careful with this, limit length)
+                    const matchYear = text.match(/(\d{4})年/);
+                    if (matchYear && text.length < 50) {
+                        console.log(`【Debug】Date extraction: Header found year-only (${sel}): ${matchYear[1]}年`);
+                        return matchYear[1];
+                    }
                 }
             }
 
-            // Check 3: "Prev Month" button URL
-            // Many times the "Prev" button has href="...year=2023&month=12"
-            // If we are on 2024/01, Prev is 2023/12. We can deduce "2024" from that context.
+            // Check 3: "Prev Month" button URL Link Analysis
             const prevBtn = document.querySelector('a.fc-button-prev, a.btn-prev, .previous_month a');
             if (prevBtn && prevBtn.href) {
                 try {
@@ -294,7 +317,7 @@
                     const py = u.searchParams.get('year');
                     const pm = u.searchParams.get('month');
                     if (py && pm) {
-                        // Calculate "Current" from "Prev"
+                        // Logic: Prev month is Y/M, so Current is Prev + 1 month
                         let y = parseInt(py, 10);
                         let m = parseInt(pm, 10);
                         m++;
@@ -305,35 +328,39 @@
                 } catch (e) { }
             }
 
-            // Check 4: "Next Month" button URL
-            const nextBtn = document.querySelector('a.fc-button-next, a.btn-next, .next_month a');
-            if (nextBtn && nextBtn.href) {
-                try {
-                    const u = new URL(nextBtn.href, window.location.origin);
-                    const ny = u.searchParams.get('year');
-                    const nm = u.searchParams.get('month');
-                    if (ny && nm) {
-                        // Calculate "Current" from "Next"
-                        let y = parseInt(ny, 10);
-                        let m = parseInt(nm, 10);
-                        m--;
-                        if (m < 1) { m = 12; y--; }
-                        console.log(`【Debug】Date extraction: Deduced from Next Button link (${ny}/${nm}) -> ${y}`);
-                        return y.toString();
-                    }
-                } catch (e) { }
+            // Check 4: Table Content Inspection (YYYY/MM/DD)
+            // Sometimes the first column has the full date
+            const dateCells = document.querySelectorAll('td.date, td:first-child');
+            for (let i = 0; i < Math.min(dateCells.length, 5); i++) {
+                const txt = dateCells[i].innerText.trim();
+                const match = txt.match(/^(\d{4})[\/／\-](\d{1,2})[\/／\-](\d{1,2})/); // 2024/01/01
+                if (match) {
+                    console.log(`【Debug】Date extraction: Found in table row: ${match[1]}`);
+                    return match[1];
+                }
             }
 
-            // Fallback
+            // Check 5: Body Text Search (Brute Force / Last Resort)
+            // Grab the first 3000 chars of visible text and look for "YYYY年MM月"
+            const bodyTop = document.body.innerText.slice(0, 3000).replace(/\s+/g, '');
+            const bodyMatch = bodyTop.match(/(\d{4})年(\d{1,2})月/);
+            if (bodyMatch) {
+                console.log(`【Debug】Date extraction: Found inside page text (brute force): ${bodyMatch[1]}年${bodyMatch[2]}月`);
+                return bodyMatch[1];
+            }
+
+            // Fallback (Failed)
             const currentYear = new Date().getFullYear().toString();
             console.warn(`【Warning】Year could not be determined from page. Using current year: ${currentYear}`);
-            console.log(`【Debug】Failed to find year. Checked URL, Header, and Button Links.`);
+            console.log(`【Debug】Failed to find year. Checked URL, Headers, Buttons, Table, and Body text.`);
             return currentYear;
         };
 
         const scrapeFromElement = (element) => {
             const rows = element.querySelectorAll('tr');
             const data = [];
+
+            // Get the year ONCE per page scrape to ensure consistency
             const pageYear = getYearFromPage();
 
             rows.forEach(row => {
@@ -346,7 +373,6 @@
                 let source = getText('qt-financial_institution');
                 let category = "";
 
-                // クラスで見つからない場合、列インデックスで取得
                 if ((!dateRaw || !content || !amountRaw) && cells.length >= 6) {
                     if (!dateRaw) dateRaw = cells[0]?.innerText.trim();
                     if (!content) content = cells[1]?.innerText.trim();
@@ -357,15 +383,13 @@
                     source = cells[4]?.innerText.trim();
                 }
 
-                // カテゴリの取得
                 const catLarge = getText('qt-large_category') || (cells.length > 5 ? cells[5]?.innerText.trim() : "");
                 const catMiddle = getText('qt-middle_category') || (cells.length > 6 ? cells[6]?.innerText.trim() : "");
-
                 category = [catLarge, catMiddle].filter(c => c).join("/");
 
                 if (dateRaw && content && amountRaw) {
                     let date = dateRaw;
-                    // "01/01(木)" や "8/28" などを "YYYY/MM/DD" に正規化
+                    // Normalize date: "01/01(Thu)" -> "YYYY/MM/DD"
                     const dateMatch = dateRaw.match(/(\d{1,2})\s*[\/／]\s*(\d{1,2})/);
                     if (dateMatch) {
                         const m = dateMatch[1].padStart(2, '0');
@@ -393,21 +417,18 @@
 
             let syncSettings;
             try {
-                // GASはリクエストボディの中身を単純なテキストとして返すこともある。
-                // 確実にJSONパースを試みる
                 syncSettings = JSON.parse(resConfig.responseText);
             } catch (e) {
                 console.error("Invalid Response:", resConfig.responseText.slice(0, 500));
-                // 認証エラーHTMLの場合
                 if (resConfig.responseText.trim().startsWith('<')) {
-                    throw new Error("GASがHTMLエラーを返しました。\n\n【重要】GASのURLが『最新版』か確認してください。\n1. Tampermonkeyの機能メニューから「GAS URLを再設定」を選択\n2. GASのデプロイ管理画面で『最新の』ウェブアプリURLをコピーして設定\n※URLはデプロイのたびに変わる場合があります！");
+                    throw new Error("GASがHTMLエラーを返しました。\nHTMLが返ってきているため、URL設定や認証を確認してください。");
                 }
                 throw new Error("GASからの応答が不正です (JSONパースエラー): " + e.message);
             }
 
             if (syncSettings.status === 'error') throw new Error(syncSettings.message);
 
-            // 開始年月設定 (2021年10月)
+            // 開始年月設定 (2021年10月まで)
             const TARGET_START_YEAR = 2021;
             const TARGET_START_MONTH = 10;
             const calculateMonthsToTarget = () => {
@@ -432,13 +453,14 @@
 
                 if (i > 0) await new Promise(r => setTimeout(r, 2000));
 
+                // Get data from current page
                 const data = scrapeCurrentPage();
                 console.log(`Month ${i + 1}: ${data.length} items found.`);
                 allData.push(...data);
 
                 if (i < monthsToSync - 1) {
                     const prevButtons = [
-                        'button.fc-button-prev', // FullCalendar standard
+                        'button.fc-button-prev',
                         '.fc-header-left .fc-button-prev',
                         '#bda-in-closing-month-asset a:first-child',
                         '.transaction_list .pagination .prev a',
@@ -464,28 +486,30 @@
                         try {
                             prevMonthButton.click();
                             await waitForElementToDisappear('#loading', '#loading-overlay', '.loading-spinner');
-                            // 遷移後の待機時間を少し確保
                             await new Promise(r => setTimeout(r, 1500));
                         } catch (err) {
                             console.warn("ページ遷移エラー", err);
                             break;
                         }
                     } else {
-                        // ボタンが見つからない場合のフォールバック：URL操作で遷移
+                        // URL Fallback
                         console.warn(`【Debug】Previous button not found. Attempting URL fallback.`);
 
                         const currentYearStr = getYearFromPage();
-                        // 月を取得
+                        // Try to get month specifically for navigation math
                         let currentMonthStr = "";
                         const urlParams = new URLSearchParams(window.location.search);
                         if (urlParams.has('month')) {
                             currentMonthStr = urlParams.get('month');
                         } else {
-                            const headerTitle = document.querySelector('.fc-header-title');
-                            if (headerTitle) {
-                                const text = headerTitle.innerText.replace(/\s+/g, '');
-                                const match = text.match(/(\d{1,2})月/);
-                                if (match) currentMonthStr = match[1];
+                            // Try to extract just the month from DOM
+                            const headerSelectors = ['.fc-header-title', 'h1', 'h2'];
+                            for (const sel of headerSelectors) {
+                                const el = document.querySelector(sel);
+                                if (el) {
+                                    const m = el.innerText.match(/(\d{1,2})月/);
+                                    if (m) { currentMonthStr = m[1]; break; }
+                                }
                             }
                         }
 
@@ -493,12 +517,8 @@
                             let y = parseInt(currentYearStr, 10);
                             let m = parseInt(currentMonthStr, 10);
 
-                            // 前月計算
                             m--;
-                            if (m < 1) {
-                                m = 12;
-                                y--;
-                            }
+                            if (m < 1) { m = 12; y--; }
 
                             const nextUrl = new URL(window.location.href);
                             nextUrl.searchParams.set('year', y);
@@ -506,7 +526,6 @@
                             console.log(`【Debug】Navigating to: ${nextUrl.toString()}`);
                             window.location.href = nextUrl.toString();
 
-                            // ページ遷移発生のため、ここでループ中断
                             await new Promise(r => setTimeout(r, 10000));
                         } else {
                             console.warn(`【Debug】Could not determine current date for URL fallback.`);
@@ -551,7 +570,6 @@
         }
     }
 
-    // Tampermonkeyメニューに設定コマンドを登録
     GM_registerMenuCommand('GAS URLを再設定', promptAndSetGasUrl);
     GM_registerMenuCommand('強制フル同期 (2021/10〜)', () => {
         if (confirm("2021年10月まで遡って同期を実行しますか？\n(時間がかかります)")) {
@@ -559,7 +577,6 @@
         }
     });
 
-    // 初期化処理
     try {
         addStyles();
         showStatus("MF Sync: 待機中...");
