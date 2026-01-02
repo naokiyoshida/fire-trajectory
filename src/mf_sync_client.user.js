@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         fire-trajectory-sync-client
 // @namespace    http://tampermonkey.net/
-// @version      3.15
+// @version      3.16
 // @description  Money Forward MEのデータをGASへ自動同期します。(URL強制遷移/ページリロード型)
 // @author       Naoki Yoshida
 // @match        https://moneyforward.com/cf*
@@ -14,7 +14,7 @@
 // @grant        GM_xmlhttpRequest
 // ==/UserScript==
 
-(function () {
+(async function () {
     'use strict';
 
     // --- 永続化ステート管理用キー ---
@@ -323,7 +323,6 @@
             try {
                 config = JSON.parse(resConfig.responseText);
             } catch (e) {
-                // エラーでも最低限の設定で動くようにする
                 console.warn("GAS Config Fetch Failed, using default.");
                 config = { mode: "Incremental" };
             }
@@ -343,7 +342,6 @@
             console.log(`【Plan】Syncing ${monthsToSync} months based on End Date: ${currentYear}/${currentMonth}`);
 
             // キュー作成 (現在 -> 過去)
-            // 例: 2026/01, 2025/12, ...
             const queue = [];
             for (let i = 0; i < monthsToSync; i++) {
                 let y = currentYear;
@@ -368,7 +366,7 @@
     GM_registerMenuCommand('強制フル同期 (2021/10〜)', () => startSync(true));
     GM_registerMenuCommand('通常同期を開始', () => startSync(false));
 
-    // 強制停止コマンド（トラブル時用）
+    // 強制停止コマンド
     GM_registerMenuCommand('同期プロセスをリセット(停止)', async () => {
         await GM_setValue(KEY_SYNC_MODE, null);
         await GM_setValue(KEY_SYNC_QUEUE, '[]');
