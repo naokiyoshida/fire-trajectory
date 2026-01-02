@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         fire-trajectory-sync-client
 // @namespace    http://tampermonkey.net/
-// @version      3.17
+// @version      3.18
 // @description  Money Forward MEのデータをGASへ自動同期します。(URL強制遷移/ページリロード型)
 // @author       Naoki Yoshida
 // @match        https://moneyforward.com/cf*
@@ -159,10 +159,16 @@
         // URLが一致する場合 -> スクレイピング実行
         showStatus(`同期中: ${currentTarget.year}年${currentTarget.month}月 (残り${queue.length}ヶ月)`);
 
+        // ページ描画待ち (SPA遷移や遅延ロード対策) - 少し長めに待つ
+        await new Promise(r => setTimeout(r, 2000));
+        window.scrollTo(0, document.body.scrollHeight); // 下までスクロールしてLazy Load誘発
+        await new Promise(r => setTimeout(r, 1000));
+
         // テーブル待機
         let activeSelector = null;
         try {
-            const result = await waitForSyncTarget(5000);
+            // タイムアウトを8秒に延長
+            const result = await waitForSyncTarget(8000);
             activeSelector = result.selector;
         } catch (e) {
             console.warn("明細テーブルが見つかりません (データ0件の可能性)");
@@ -191,7 +197,7 @@
         }, 1000);
     }
 
-    const waitForSyncTarget = (timeout = 6000) => {
+    const waitForSyncTarget = (timeout = 8000) => {
         const TARGET_SELECTORS = [
             '#cf-detail-table tbody',
             '#cf-detail-table',
@@ -202,10 +208,17 @@
         ];
 
         return new Promise((resolve, reject) => {
+            // 要素が存在し、かつ行(tr)が1行以上含まれているか、またはロード完了済みとみなせるか
             const find = () => {
                 for (const selector of TARGET_SELECTORS) {
                     const el = document.querySelector(selector);
-                    if (el) return { el, selector };
+                    if (el) {
+                        // もしtbodyなら、中身がtrを含んでいるかチェックしたほうが確実かも
+                        // ただし0件の月もあるので、要素さえあればOKとするが、
+                        // ロード中のスピナーがある場合はまだNGとしたい
+                        if (document.querySelector('.loading-spinner') || document.querySelector('#loading-overlay')) return null;
+                        return { el, selector };
+                    }
                 }
                 return null;
             };
@@ -315,7 +328,6 @@
         try {
             showStatus("設定確認中... (しばらくお待ちください)");
 
-            // 設定確認は行いますが、モードは「手動実行」の意図を最優先します
             const resConfig = await fetchWithRetry(gasUrl, {
                 method: "POST",
                 body: JSON.stringify({ action: "get_sync_config" })
