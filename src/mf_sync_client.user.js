@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         fire-trajectory-sync-client
 // @namespace    http://tampermonkey.net/
-// @version      3.11
+// @version      3.12
 // @description  Money Forward MEのデータをGASへ自動同期します。Adaptive Syncにより初回52ヶ月/通常6ヶ月を自動判別。
 // @author       Naoki Yoshida
 // @match        https://moneyforward.com/cf*
@@ -238,7 +238,7 @@
             console.warn("初期表示で明細テーブルが見つかりませんでした。明細0件の可能性があります。ナビゲーションボタンを探します...");
         }
 
-        const scrapeCurrentPage = () => {
+        const scrapeCurrentPage = (yearOverride) => {
             if (!activeSelector || !document.querySelector(activeSelector)) {
                 // 再検出
                 const targets = [
@@ -260,7 +260,7 @@
 
             const currentBody = activeSelector ? document.querySelector(activeSelector) : null;
             if (!currentBody) return [];
-            return scrapeFromElement(currentBody);
+            return scrapeFromElement(currentBody, yearOverride);
         };
 
         // ページから年を取得する関数
@@ -293,10 +293,11 @@
             return currentYear;
         };
 
-        const scrapeFromElement = (element) => {
+        const scrapeFromElement = (element, yearOverride) => {
             const rows = element.querySelectorAll('tr');
             const data = [];
-            const pageYear = getYearFromPage();
+            // yearOverrideが指定されていればそれを使い、なければページから取得
+            const pageYear = yearOverride || getYearFromPage();
 
             rows.forEach(row => {
                 const getText = (cls) => row.querySelector(`.${cls}`)?.innerText.trim();
@@ -386,16 +387,35 @@
             showStatus(`モード: ${forceFull ? '強制Full' : syncSettings.mode} (${monthsToSync}ヶ月) で同期開始`);
             console.log(`【Debug】Syncing for ${monthsToSync} months.`);
 
+            // 年月の追跡変数を初期化
+            let trackingYear = parseInt(getYearFromPage(), 10);
+            let trackingMonth = new Date().getMonth() + 1; // デフォルト現在月
+
+            // URLまたはヘッダーから現在月を取得を試みる
+            const urlParams = new URLSearchParams(window.location.search);
+            if (urlParams.has('month')) {
+                trackingMonth = parseInt(urlParams.get('month'), 10);
+            } else {
+                const headerTitle = document.querySelector('.fc-header-title');
+                if (headerTitle) {
+                    const text = headerTitle.innerText.replace(/\s+/g, '');
+                    const match = text.match(/(\d{1,2})月/);
+                    if (match) trackingMonth = parseInt(match[1], 10);
+                }
+            }
+            console.log(`【Debug】Start Date Tracking: ${trackingYear}/${trackingMonth}`);
+
             let allData = [];
 
             // 2. 複数月のデータをスクレイピング
             for (let i = 0; i < monthsToSync; i++) {
-                showStatus(`データ取得中: ${i + 1} / ${monthsToSync} ヶ月目`);
+                showStatus(`データ取得中: ${i + 1} / ${monthsToSync} ヶ月目 (${trackingYear}年${trackingMonth}月)`);
 
                 if (i > 0) await new Promise(r => setTimeout(r, 2000));
 
-                const data = scrapeCurrentPage();
-                console.log(`Month ${i + 1}: ${data.length} items found.`);
+                // 年を明示的に渡してスクレイピング
+                const data = scrapeCurrentPage(trackingYear);
+                console.log(`Month ${i + 1} (${trackingYear}/${trackingMonth}): ${data.length} items found.`);
                 allData.push(...data);
 
                 if (i < monthsToSync - 1) {
@@ -428,6 +448,14 @@
                             await waitForElementToDisappear('#loading', '#loading-overlay', '.loading-spinner');
                             // 遷移後の待機時間を少し確保
                             await new Promise(r => setTimeout(r, 1500));
+
+                            // 追跡日付を前月に更新
+                            trackingMonth--;
+                            if (trackingMonth < 1) {
+                                trackingMonth = 12;
+                                trackingYear--;
+                            }
+
                         } catch (err) {
                             console.warn("ページ遷移エラー", err);
                             break;
@@ -436,47 +464,19 @@
                         // ボタンが見つからない場合のフォールバック：URL操作で遷移
                         console.warn(`【Debug】Previous button not found. Attempting URL fallback.`);
 
-                        const currentYearStr = getYearFromPage();
-                        // 月を取得 (URLパラメータ or ヘッダーテキスト)
-                        let currentMonthStr = "";
-                        const urlParams = new URLSearchParams(window.location.search);
-                        if (urlParams.has('month')) {
-                            currentMonthStr = urlParams.get('month');
-                        } else {
-                            const headerTitle = document.querySelector('.fc-header-title');
-                            if (headerTitle) {
-                                // 2024年12月 => 12
-                                const text = headerTitle.innerText.replace(/\s+/g, '');
-                                const match = text.match(/(\d{1,2})月/);
-                                if (match) currentMonthStr = match[1];
-                            }
-                        }
+                        // 現在の追跡変数を使ってURL生成
+                        let nextY = trackingYear;
+                        let nextM = trackingMonth - 1;
+                        if (nextM < 1) { nextM = 12; nextY--; }
 
-                        if (currentYearStr && currentMonthStr) {
-                            let y = parseInt(currentYearStr, 10);
-                            let m = parseInt(currentMonthStr, 10);
+                        const nextUrl = new URL(window.location.href);
+                        nextUrl.searchParams.set('year', nextY);
+                        nextUrl.searchParams.set('month', nextM);
+                        console.log(`【Debug】Navigating to: ${nextUrl.toString()}`);
+                        window.location.href = nextUrl.toString();
 
-                            // 前月計算
-                            m--;
-                            if (m < 1) {
-                                m = 12;
-                                y--;
-                            }
-
-                            const nextUrl = new URL(window.location.href);
-                            nextUrl.searchParams.set('year', y);
-                            nextUrl.searchParams.set('month', m);
-                            console.log(`【Debug】Navigating to: ${nextUrl.toString()}`);
-                            window.location.href = nextUrl.toString();
-
-                            // ページ遷移発生のため、ここでループ中断
-                            await new Promise(r => setTimeout(r, 10000));
-                        } else {
-                            console.warn(`【Debug】Could not determine current date for URL fallback.`);
-                            showStatus("エラー: 移動ボタンが見つからず、日付も特定できません", 5000, true);
-                            diagnoseDOM();
-                            break;
-                        }
+                        // ページ遷移発生のため、ここでループ中断
+                        await new Promise(r => setTimeout(r, 10000));
                     }
                 }
             }
