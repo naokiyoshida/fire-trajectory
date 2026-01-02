@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         fire-trajectory-sync-client
 // @namespace    http://tampermonkey.net/
-// @version      2.6
+// @version      3.0
 // @description  Money Forward MEのデータをGASへ自動同期します。Adaptive Syncにより初回52ヶ月/通常6ヶ月を自動判別。
 // @author       Naoki Yoshida
 // @match        https://moneyforward.com/cf*
@@ -11,6 +11,7 @@
 // @grant        GM_getValue
 // @grant        GM_setValue
 // @grant        GM_registerMenuCommand
+// @grant        GM_xmlhttpRequest
 // ==/UserScript==
 
 (function () {
@@ -38,12 +39,15 @@
                 opacity: 0;
                 pointer-events: none;
             }
+            #mf-sync-status.error {
+                background: rgba(200, 0, 0, 0.9);
+            }
         `;
         document.head.appendChild(style);
     };
 
     // ステータス表示
-    const showStatus = (message, duration = 0) => {
+    const showStatus = (message, duration = 0, isError = false) => {
         let el = document.getElementById('mf-sync-status');
         if (!el) {
             el = document.createElement('div');
@@ -52,6 +56,9 @@
         }
         el.innerText = message;
         el.classList.remove('hidden');
+        if (isError) el.classList.add('error');
+        else el.classList.remove('error');
+
         if (duration > 0) {
             setTimeout(() => {
                 el.classList.add('hidden');
@@ -62,8 +69,12 @@
     // GAS URLを設定する関数
     const promptAndSetGasUrl = async () => {
         const currentUrl = await GM_getValue('GAS_URL', '');
-        const newUrl = prompt('GASのデプロイメントURLを入力してください:', currentUrl);
+        const newUrl = prompt('GASのウェブアプリURLを入力してください(execで終わるもの):', currentUrl);
         if (newUrl) {
+            // URL形式の簡易チェック
+            if (!newUrl.includes('/exec')) {
+                alert('警告: URLの末尾が "/exec" ではないようです。\n正しい「ウェブアプリURL」かどうか確認してください。\n(スクリプトエディタのURLではありません)');
+            }
             await GM_setValue('GAS_URL', newUrl);
             showStatus('GAS URLを保存しました', 3000);
             return newUrl;
@@ -90,12 +101,35 @@
         });
     };
 
-    // リトライ機能付きのfetch関数
+    // GM_xmlhttpRequest を Promise 化したラッパー (CORS回避用)
+    const gmFetch = (url, options) => {
+        return new Promise((resolve, reject) => {
+            GM_xmlhttpRequest({
+                method: options.method || 'GET',
+                url: url,
+                headers: {
+                    "Content-Type": "application/json"
+                },
+                data: options.body,
+                onload: (response) => {
+                    if (response.status >= 200 && response.status < 300) {
+                        resolve(response);
+                    } else {
+                        reject(new Error(`HTTP Error: ${response.status} ${response.statusText}`));
+                    }
+                },
+                onerror: (err) => {
+                    reject(new Error("Network Error"));
+                }
+            });
+        });
+    };
+
+    // リトライ機能付きのfetch関数 (gmFetch使用)
     const fetchWithRetry = async (url, options, retries = 3, delay = 3000) => {
         for (let i = 0; i < retries; i++) {
             try {
-                const response = await fetch(url, options);
-                if (!response.ok) throw new Error(`Status ${response.status}`);
+                const response = await gmFetch(url, options);
                 return response;
             } catch (error) {
                 console.warn(`Sync retry ${i + 1}/${retries}: ${error.message}`);
@@ -169,21 +203,20 @@
         console.log("【fire-trajectory】同期プロセスを開始します...");
 
         let gasUrl = await GM_getValue('GAS_URL');
-        if (!gasUrl) {
-            showStatus("GAS URL未設定。設定が必要です...");
+        if (!gasUrl || gasUrl.includes('/macros/library/') || !gasUrl.includes('/exec')) {
+            showStatus("GAS URLが不正または未設定です", 0, true);
+            alert("【設定エラー】\nGASのURLが正しく設定されていません。\n\n現在の値: " + (gasUrl || "未設定") + "\n\n・「ライブラリ(library)」のURLになっていませんか？\n・末尾が「/exec」になっている「ウェブアプリURL」を使用してください。\n・GASエディタの「デプロイ」→「デプロイを管理」からURLをコピーしてください。");
+
             await new Promise(r => setTimeout(r, 500));
             gasUrl = await promptAndSetGasUrl();
             if (!gasUrl) {
-                showStatus("GAS URL未設定のため中断", 5000);
+                showStatus("GAS URL未設定のため中断", 5000, true);
                 return;
             }
         }
 
-        // ターゲット要素を特定
         let activeSelector = null;
         try {
-            // 最初に見つからなくても即座にエラーにせず、ループ内で再検索する戦略へ変更
-            // 一応軽く待ってみる
             const result = await waitForSyncTarget(5000);
             activeSelector = result.selector;
             console.log(`【fire-trajectory】対象テーブルを検出しました (Selector: ${activeSelector})`);
@@ -192,7 +225,6 @@
         }
 
         const scrapeCurrentPage = () => {
-            // まだセレクタが特定できていない、またはページ遷移でDOMが変わった場合は再検索
             if (!activeSelector || !document.querySelector(activeSelector)) {
                 const targets = [
                     '#cf-detail-table tbody',
@@ -212,11 +244,7 @@
             }
 
             const currentBody = activeSelector ? document.querySelector(activeSelector) : null;
-
-            if (!currentBody) {
-                console.warn("明細テーブルが見つかりません。この月は明細なしか、ロード未完了の可能性があります。");
-                return [];
-            }
+            if (!currentBody) return [];
             return scrapeFromElement(currentBody);
         };
 
@@ -237,7 +265,6 @@
                     if (cells.length >= 5) {
                         if (!date) date = cells[0]?.innerText.trim();
                         if (!content) content = cells[1]?.innerText.trim();
-                        // 3列目(index 2)に金額が入っているが、spanで囲まれている場合などに対応
                         if (!amountRaw) amountRaw = cells[2]?.querySelector('span')?.innerText.trim() || cells[2]?.innerText.trim();
                         if (!source) source = cells[3]?.innerText.trim();
                         if (!category) category = cells[4]?.innerText.trim();
@@ -261,7 +288,9 @@
                 method: "POST",
                 body: JSON.stringify({ action: "get_sync_config" })
             });
-            const syncSettings = await resConfig.json();
+
+            // GM_xmlhttpRequestのレスポンスは .json() メソッドを持たないのでパースが必要
+            const syncSettings = JSON.parse(resConfig.responseText);
             if (syncSettings.status === 'error') throw new Error(syncSettings.message);
 
             showStatus(`モード: ${syncSettings.mode} で同期開始`);
@@ -273,19 +302,18 @@
             for (let i = 0; i < monthsToSync; i++) {
                 showStatus(`データ取得中: ${i + 1}ヶ月目`);
 
-                if (i > 0) await new Promise(r => setTimeout(r, 1500));
+                if (i > 0) await new Promise(r => setTimeout(r, 2000)); // 待ち時間を少し延長
 
                 const data = scrapeCurrentPage();
                 console.log(`Month ${i + 1}: ${data.length} items found.`);
                 allData.push(...data);
 
                 if (i < monthsToSync - 1) {
-                    // 「前の月へ」ボタンのセレクタ
                     const prevButtons = [
-                        '#bda-in-closing-month-asset a:first-child', // 振替なし表示
-                        '.transaction_list .pagination .prev a',     // 一般的なページネーション
-                        'button.btn-prev-month',                     // ボタンタグの場合
-                        'a.fc-button-prev',                           // カレンダーライク
+                        '#bda-in-closing-month-asset a:first-child',
+                        '.transaction_list .pagination .prev a',
+                        'button.btn-prev-month',
+                        'a.fc-button-prev',
                         'a.btn-prev',
                         '.previous_month',
                         '#menu_range_prev'
@@ -309,10 +337,9 @@
                             break;
                         }
                     } else {
-                        console.warn("「前の月へ」ボタンが見つかりません。ループを終了します。");
-                        // 最初の月でボタンも見つからない場合は致命的なのでアラート
+                        // 最初の月でボタンも見つからない場合は致命的
                         if (i === 0) {
-                            showStatus("エラー: 移動ボタンが見つかりません", 5000);
+                            showStatus("エラー: 移動ボタンが見つかりません", 5000, true);
                             diagnoseDOM();
                         }
                         break;
@@ -329,19 +356,18 @@
                     method: "POST",
                     body: JSON.stringify({ action: "sync_data", data: uniqueData })
                 });
-                const result = await resSync.json();
+                const result = JSON.parse(resSync.responseText);
                 if (result.status === 'error') throw new Error(result.message);
                 showStatus(`完了: ${result.count}件同期しました`, 5000);
                 setTimeout(() => { window.close(); }, 3000);
             } else {
                 showStatus("送信するデータがありません (0件)", 5000);
-                // 0件でも完了とする
             }
             console.log("同期処理完了");
 
         } catch (e) {
             console.error(e);
-            showStatus(`エラー: ${e.message}`, 10000);
+            showStatus(`エラー: ${e.message}`, 10000, true);
             alert(`エラーが発生しました: ${e.message}`);
         }
     }
@@ -350,7 +376,6 @@
     try {
         addStyles();
         showStatus("MF Sync: 待機中...");
-
         runSync();
     } catch (e) {
         console.error("Critical Error", e);
