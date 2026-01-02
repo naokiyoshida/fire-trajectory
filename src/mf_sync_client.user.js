@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         fire-trajectory-sync-client
 // @namespace    http://tampermonkey.net/
-// @version      3.9
+// @version      3.10
 // @description  Money Forward MEのデータをGASへ自動同期します。Adaptive Syncにより初回52ヶ月/通常6ヶ月を自動判別。
 // @author       Naoki Yoshida
 // @match        https://moneyforward.com/cf*
@@ -195,6 +195,8 @@
         console.log("Main content check:", document.querySelector('#main') ? "Found" : "Not Found");
         // ボタンも探してみる
         const prevButtons = [
+            'button.fc-button-prev',
+            '.fc-header-left .fc-button-prev',
             '#bda-in-closing-month-asset a:first-child',
             '.transaction_list .pagination .prev a',
             'button.btn-prev-month',
@@ -382,13 +384,16 @@
 
                 if (i < monthsToSync - 1) {
                     const prevButtons = [
+                        'button.fc-button-prev', // FullCalendar standard
+                        '.fc-header-left .fc-button-prev',
                         '#bda-in-closing-month-asset a:first-child',
                         '.transaction_list .pagination .prev a',
                         'button.btn-prev-month',
                         'a.fc-button-prev',
                         'a.btn-prev',
                         '.previous_month',
-                        '#menu_range_prev'
+                        '#menu_range_prev',
+                        'a.btn[href*="month="]'
                     ];
 
                     let prevMonthButton = null;
@@ -412,11 +417,48 @@
                             break;
                         }
                     } else {
-                        console.warn(`【Debug】Month ${i + 1}: Previous month button NOT found.`);
-                        console.warn(`Tried selectors: ${prevButtons.join(', ')}`);
-                        showStatus("エラー: 移動ボタンが見つかりません", 5000, true);
-                        diagnoseDOM();
-                        break;
+                        // ボタンが見つからない場合のフォールバック：URL操作で遷移
+                        console.warn(`【Debug】Previous button not found. Attempting URL fallback.`);
+
+                        const currentYearStr = getYearFromPage();
+                        // 月を取得 (URLパラメータ or ヘッダーテキスト)
+                        let currentMonthStr = "";
+                        const urlParams = new URLSearchParams(window.location.search);
+                        if (urlParams.has('month')) {
+                            currentMonthStr = urlParams.get('month');
+                        } else {
+                            const headerTitle = document.querySelector('.fc-header-title');
+                            if (headerTitle) {
+                                const match = headerTitle.innerText.match(/(\d{1,2})月/);
+                                if (match) currentMonthStr = match[1];
+                            }
+                        }
+
+                        if (currentYearStr && currentMonthStr) {
+                            let y = parseInt(currentYearStr, 10);
+                            let m = parseInt(currentMonthStr, 10);
+
+                            // 前月計算
+                            m--;
+                            if (m < 1) {
+                                m = 12;
+                                y--;
+                            }
+
+                            const nextUrl = new URL(window.location.href);
+                            nextUrl.searchParams.set('year', y);
+                            nextUrl.searchParams.set('month', m);
+                            console.log(`【Debug】Navigating to: ${nextUrl.toString()}`);
+                            window.location.href = nextUrl.toString();
+
+                            // ページ遷移発生のため、ここでループ中断
+                            await new Promise(r => setTimeout(r, 10000));
+                        } else {
+                            console.warn(`【Debug】Could not determine current date for URL fallback.`);
+                            showStatus("エラー: 移動ボタンが見つからず、日付も特定できません", 5000, true);
+                            diagnoseDOM();
+                            break;
+                        }
                     }
                 }
             }
