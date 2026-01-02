@@ -3,6 +3,14 @@ const SCRIPT_PROPERTIES = PropertiesService.getScriptProperties();
 const SHEET_NAME = SCRIPT_PROPERTIES.getProperty('SHEET_NAME') || 'Database';
 
 /**
+ * 外部からのGETリクエストを処理する関数（動作確認用）。
+ * ブラウザでURLを直接開いた場合に、アプリが稼働していることを示します。
+ */
+function doGet(e) {
+  return createJsonResponse({ status: "success", message: "GAS Web App is active." });
+}
+
+/**
  * 外部（Tampermonkey）からのPOSTリクエストを処理するメインの関数。
  * リクエストの`action`に応じて、適切なハンドラ関数に処理を委譲します。
  */
