@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         fire-trajectory-sync-client
 // @namespace    http://tampermonkey.net/
-// @version      2.3
+// @version      2.4
 // @description  Money Forward MEのデータをGASへ自動同期します。Adaptive Syncにより初回52ヶ月/通常6ヶ月を自動判別。
 // @author       Naoki Yoshida
 // @match        https://moneyforward.com/cf*
@@ -74,43 +74,14 @@
     // Tampermonkeyメニューに設定コマンドを登録
     GM_registerMenuCommand('GAS URLを再設定', promptAndSetGasUrl);
 
-    // 指定された要素が出現するまで待つ関数（タイムアウト付き）
-    const waitForElement = (selector, timeout = 10000) => {
-        return new Promise((resolve, reject) => {
-            const el = document.querySelector(selector);
-            if (el) return resolve(el);
-
-            const startTime = Date.now();
-            const observer = new MutationObserver(() => {
-                const targetEl = document.querySelector(selector);
-                if (targetEl) {
-                    observer.disconnect();
-                    resolve(targetEl);
-                } else if (Date.now() - startTime > timeout) {
-                    observer.disconnect();
-                    reject(new Error(`Timeout waiting for element: ${selector}`));
-                }
-            });
-
-            observer.observe(document.body, { childList: true, subtree: true });
-
-            // 念のためのタイムアウト設定
-            setTimeout(() => {
-                observer.disconnect();
-                const targetEl = document.querySelector(selector);
-                if (targetEl) resolve(targetEl);
-                else reject(new Error(`Timeout waiting for element: ${selector}`));
-            }, timeout);
-        });
-    };
-
     // 指定された要素が消えるまで待つ関数
-    const waitForElementToDisappear = (selector) => {
+    const waitForElementToDisappear = (...selectors) => {
         return new Promise(resolve => {
-            if (!document.querySelector(selector)) return resolve();
+            const check = () => !selectors.some(s => document.querySelector(s));
+            if (check()) return resolve();
 
             const observer = new MutationObserver(() => {
-                if (!document.querySelector(selector)) {
+                if (check()) {
                     observer.disconnect();
                     resolve();
                 }
@@ -135,6 +106,62 @@
         }
     };
 
+    // 複数のセレクタを試して要素を探す関数
+    const waitForSyncTarget = (timeout = 10000) => {
+        const TARGET_SELECTORS = [
+            '#transaction_list_body',       // オリジナル
+            '.js-transaction_table tbody',  // クラスベース
+            'table.transaction_table tbody', // 構造ベース
+            'section.transaction-section'   // セクション全体
+        ];
+
+        return new Promise((resolve, reject) => {
+            const find = () => {
+                for (const selector of TARGET_SELECTORS) {
+                    const el = document.querySelector(selector);
+                    if (el) return { el, selector };
+                }
+                return null;
+            };
+
+            const found = find();
+            if (found) return resolve(found);
+
+            const startTime = Date.now();
+            const observer = new MutationObserver(() => {
+                const found = find();
+                if (found) {
+                    observer.disconnect();
+                    resolve(found);
+                } else if (Date.now() - startTime > timeout) {
+                    observer.disconnect();
+                    reject(new Error(`Timeout waiting for targets: ${TARGET_SELECTORS.join(', ')}`));
+                }
+            });
+
+            observer.observe(document.body, { childList: true, subtree: true });
+
+            setTimeout(() => {
+                observer.disconnect();
+                const found = find();
+                if (found) resolve(found);
+                else reject(new Error(`Timeout waiting for targets: ${TARGET_SELECTORS.join(', ')}`));
+            }, timeout);
+        });
+    };
+
+    // DOM診断用関数
+    const diagnoseDOM = () => {
+        console.group("【fire-trajectory】DOM診断レポート");
+        console.log("URL:", window.location.href);
+        console.log("Tables found:", document.querySelectorAll('table').length);
+        document.querySelectorAll('table').forEach((t, i) => {
+            console.log(`Table[${i}]: id="${t.id}", class="${t.className}"`);
+        });
+        console.log("Main content check:", document.querySelector('#main') ? "Found" : "Not Found");
+        console.groupEnd();
+    };
+
     async function runSync() {
         showStatus("同期プロセスを開始...");
         console.log("【fire-trajectory】同期プロセスを開始します...");
@@ -142,7 +169,6 @@
         let gasUrl = await GM_getValue('GAS_URL');
         if (!gasUrl) {
             showStatus("GAS URL未設定。設定が必要です...");
-            // 少し待ってからプロンプトを出す（UI描画との競合を防ぐため）
             await new Promise(r => setTimeout(r, 500));
             gasUrl = await promptAndSetGasUrl();
             if (!gasUrl) {
@@ -151,21 +177,43 @@
             }
         }
 
+        // ターゲット要素を特定
+        let targetBody = null;
+        try {
+            const result = await waitForSyncTarget(10000); // 10秒待機
+            targetBody = result.el;
+            console.log(`【fire-trajectory】対象テーブルを検出しました (Selector: ${result.selector})`);
+        } catch (e) {
+            showStatus("エラー: 明細表が見つかりません", 10000);
+            console.error(e);
+            diagnoseDOM();
+            return;
+        }
+
         const scrapeCurrentPage = () => {
-            const tableBody = document.getElementById('transaction_list_body');
-            if (!tableBody) {
-                console.warn("明細テーブルが見つかりません");
+            // 再取得 (tbodyがなければ table 全体から探すなど柔軟に)
+            const currentBody = document.querySelector('#transaction_list_body') ||
+                document.querySelector('.js-transaction_table tbody') ||
+                document.querySelector('table.transaction_table tbody');
+
+            if (!currentBody) {
+                console.warn("明細テーブルが再取得できません");
                 return [];
             }
-            const rows = tableBody.querySelectorAll('tr');
+
+            const rows = currentBody.querySelectorAll('tr');
             const data = [];
             rows.forEach(row => {
-                const date = row.querySelector('.date')?.innerText.trim();
-                const content = row.querySelector('.content')?.innerText.trim();
-                const amountRaw = row.querySelector('.amount')?.innerText.trim();
-                const source = row.querySelector('.source')?.innerText.trim();
-                const category = row.querySelector('.category')?.innerText.trim();
-                if (date && content && amountRaw && source && category) {
+                // セレクタを少し緩くする (クラス名が完全一致でなくても部分一致などで取れるように調整)
+                const getText = (cls) => row.querySelector(`.${cls}`)?.innerText.trim();
+
+                const date = getText('date');
+                const content = getText('content');
+                const amountRaw = getText('amount');
+                const source = getText('source') || row.querySelector('.account')?.innerText.trim(); // source または account
+                const category = getText('category'); // 大項目・中項目が結合されている場合がある
+
+                if (date && content && amountRaw) { // 最低限これらがあれば良しとする
                     const amount = amountRaw.replace(/[,円\s]/g, '');
                     const uniqueString = `${date}-${content}-${amount}-${source}-${category}`;
                     const hashId = CryptoJS.SHA256(uniqueString).toString(CryptoJS.enc.Hex);
@@ -193,14 +241,39 @@
             // 2. 複数月のデータをスクレイピング
             for (let i = 0; i < monthsToSync; i++) {
                 showStatus(`データ取得中: ${i + 1}ヶ月目`);
-                allData.push(...scrapeCurrentPage());
+
+                if (i > 0) await new Promise(r => setTimeout(r, 1500)); // ページ遷移後の描画待ちを少し長めに
+
+                const data = scrapeCurrentPage();
+                console.log(`Month ${i + 1}: ${data.length} items found.`);
+                allData.push(...data);
 
                 if (i < monthsToSync - 1) {
-                    const prevMonthButton = document.querySelector('#bda-in-closing-month-asset a:first-child');
+                    // 「前の月へ」ボタンのセレクタも強化
+                    const prevButtons = [
+                        '#bda-in-closing-month-asset a:first-child', // 振替なし表示
+                        '.transaction_list .pagination .prev a',     // 一般的なページネーション
+                        'a.btn-check-previous-month',                 // 仮定: ボタンクラス
+                        '.fc-header-left .fc-button-prev'            // カレンダー形式の場合?
+                    ];
+
+                    let prevMonthButton = null;
+                    for (const sel of prevButtons) {
+                        prevMonthButton = document.querySelector(sel);
+                        if (prevMonthButton) break;
+                    }
+
                     if (prevMonthButton) {
-                        prevMonthButton.click();
-                        await waitForElementToDisappear('#loading');
+                        try {
+                            prevMonthButton.click();
+                            // ローディング表示があれば消えるのを待つ
+                            await waitForElementToDisappear('#loading', '#loading-overlay');
+                        } catch (err) {
+                            console.warn("ページ遷移エラー", err);
+                            break;
+                        }
                     } else {
+                        console.warn("「前の月へ」ボタンが見つかりません。ループを終了します。");
                         break;
                     }
                 }
@@ -223,7 +296,7 @@
             }
 
             console.log("完了。");
-            setTimeout(() => { window.close(); }, 3000); // ステータスが見えるように少し待つ
+            setTimeout(() => { window.close(); }, 3000);
 
         } catch (e) {
             console.error(e);
@@ -235,14 +308,10 @@
     // 初期化処理
     try {
         addStyles();
-        showStatus("MF Sync: ページ読み込み待機中...");
+        showStatus("MF Sync: 待機中...");
 
-        waitForElement('#transaction_list_body', 10000)
-            .then(runSync)
-            .catch(e => {
-                console.error(e);
-                showStatus("待機タイムアウト: 家計簿明細テーブルが見つかりません。", 10000);
-            });
+        // 実行開始 (waitForSyncTarget内で待機する)
+        runSync();
     } catch (e) {
         console.error("Critical Error", e);
     }
