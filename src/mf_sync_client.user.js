@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         fire-trajectory-sync-client
 // @namespace    http://tampermonkey.net/
-// @version      3.3
+// @version      3.4
 // @description  Money Forward MEのデータをGASへ自動同期します。Adaptive Syncにより初回52ヶ月/通常6ヶ月を自動判別。
 // @author       Naoki Yoshida
 // @match        https://moneyforward.com/cf*
@@ -111,7 +111,7 @@
                     "Content-Type": "text/plain;charset=utf-8"
                 },
                 data: options.body,
-                // anonymous: true, // 今回は外してみる。
+                anonymous: true, // 公開ウェブアプリへのアクセスにはanonymous: trueが推奨（Cookie干渉回避）
                 onload: (response) => {
                     if (response.status >= 200 && response.status < 300) {
                         resolve(response);
@@ -299,7 +299,7 @@
                 console.error("Invalid Response:", resConfig.responseText.slice(0, 500));
                 // 認証エラーHTMLの場合
                 if (resConfig.responseText.trim().startsWith('<')) {
-                    throw new Error("GASがHTMLエラーを返しました。\n設定は「全員」になっていますが、Googleのセキュリティ制限(V8 runtime等)の影響が考えられます。\nお手数ですが、一度ブラウザのシークレットモードで試してみてください。");
+                    throw new Error("GASがHTMLエラーを返しました。\n\n【重要】GASのURLが『最新版』か確認してください。\n1. Tampermonkeyの機能メニューから「GAS URLを再設定」を選択\n2. GASのデプロイ管理画面で『最新の』ウェブアプリURLをコピーして設定\n※URLはデプロイのたびに変わる場合があります！");
                 }
                 throw new Error("GASからの応答が不正です (JSONパースエラー): " + e.message);
             }
