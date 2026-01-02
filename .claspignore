@@ -1,0 +1,5 @@
+src/fire-config.js
+src/fire-config.sample.js
+src/mf_sync_client.user.js
+**/*.md
+.git/**
