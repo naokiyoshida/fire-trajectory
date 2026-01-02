@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         fire-trajectory-sync-client
 // @namespace    http://tampermonkey.net/
-// @version      3.7
+// @version      3.8
 // @description  Money Forward MEのデータをGASへ自動同期します。Adaptive Syncにより初回52ヶ月/通常6ヶ月を自動判別。
 // @author       Naoki Yoshida
 // @match        https://moneyforward.com/cf*
@@ -82,6 +82,120 @@
         return null;
     };
 
+    // 指定された要素が消えるまで待つ関数
+    const waitForElementToDisappear = (...selectors) => {
+        return new Promise(resolve => {
+            const check = () => !selectors.some(s => document.querySelector(s));
+            if (check()) return resolve();
+
+            const observer = new MutationObserver(() => {
+                if (check()) {
+                    observer.disconnect();
+                    resolve();
+                }
+            });
+            observer.observe(document.body, { childList: true, subtree: true });
+        });
+    };
+
+    // GM_xmlhttpRequest を Promise 化したラッパー (CORS回避用)
+    const gmFetch = (url, options) => {
+        return new Promise((resolve, reject) => {
+            GM_xmlhttpRequest({
+                method: options.method || 'GET',
+                url: url,
+                headers: {
+                    "Content-Type": "text/plain;charset=utf-8"
+                },
+                data: options.body,
+                anonymous: true, // 公開ウェブアプリへのアクセスにはanonymous: trueが推奨（Cookie干渉回避）
+                onload: (response) => {
+                    if (response.status >= 200 && response.status < 300) {
+                        resolve(response);
+                    } else {
+                        reject(new Error(`HTTP Error: ${response.status} ${response.statusText}`));
+                    }
+                },
+                onerror: (err) => {
+                    reject(new Error("Network Error"));
+                }
+            });
+        });
+    };
+
+    // リトライ機能付きのfetch関数 (gmFetch使用)
+    const fetchWithRetry = async (url, options, retries = 3, delay = 3000) => {
+        for (let i = 0; i < retries; i++) {
+            try {
+                const response = await gmFetch(url, options);
+                return response;
+            } catch (error) {
+                console.warn(`Sync retry ${i + 1}/${retries}: ${error.message}`);
+                showStatus(`通信エラー... リトライ中 (${i + 1}/${retries})`);
+                if (i === retries - 1) throw error;
+                await new Promise(r => setTimeout(r, delay));
+            }
+        }
+    };
+
+    // 複数のセレクタを試して要素を探す関数
+    const waitForSyncTarget = (timeout = 10000) => {
+        const TARGET_SELECTORS = [
+            '#cf-detail-table tbody',
+            '#cf-detail-table',
+            'section.transaction-section',
+            '#transaction_list_body',
+            '.js-transaction_table tbody',
+            'table.transaction_table tbody'
+        ];
+
+        return new Promise((resolve, reject) => {
+            const find = () => {
+                for (const selector of TARGET_SELECTORS) {
+                    const el = document.querySelector(selector);
+                    if (el) return { el, selector };
+                }
+                return null;
+            };
+
+            const found = find();
+            if (found) return resolve(found);
+
+            const startTime = Date.now();
+            const observer = new MutationObserver(() => {
+                const found = find();
+                if (found) {
+                    observer.disconnect();
+                    resolve(found);
+                } else if (Date.now() - startTime > timeout) {
+                    observer.disconnect();
+                    reject(new Error(`Timeout waiting for targets: ${TARGET_SELECTORS.join(', ')}`));
+                }
+            });
+
+            observer.observe(document.body, { childList: true, subtree: true });
+
+            setTimeout(() => {
+                observer.disconnect();
+                const found = find();
+                if (found) resolve(found);
+                else reject(new Error(`Timeout waiting for targets: ${TARGET_SELECTORS.join(', ')}`));
+            }, timeout);
+        });
+    };
+
+    // DOM診断用関数
+    const diagnoseDOM = () => {
+        console.group("【fire-trajectory】DOM診断レポート");
+        console.log("URL:", window.location.href);
+        console.log("Tables found:", document.querySelectorAll('table').length);
+        document.querySelectorAll('table').forEach((t, i) => {
+            console.log(`Table[${i}]: id="${t.id}", class="${t.className}"`);
+        });
+        console.log("Main content check:", document.querySelector('#main') ? "Found" : "Not Found");
+        console.groupEnd();
+    };
+
     async function runSync(forceFull = false) {
         showStatus("同期プロセスを開始...");
         console.log("【fire-trajectory】同期プロセスを開始します...");
@@ -110,7 +224,7 @@
 
         const scrapeCurrentPage = () => {
             if (!activeSelector || !document.querySelector(activeSelector)) {
-
+                // 再検出
                 const targets = [
                     '#cf-detail-table tbody',
                     '#cf-detail-table',
@@ -133,16 +247,20 @@
             return scrapeFromElement(currentBody);
         };
 
+        // ページから年を取得する関数
         const getYearFromPage = () => {
+            // 1. カレンダーのヘッダーから取得 (例: "2024年1月")
             const headerTitle = document.querySelector('.fc-header-title');
             if (headerTitle) {
                 const match = headerTitle.innerText.match(/(\d{4})年/);
                 if (match) return match[1];
             }
+            // 2. URLパラメータから取得
             const urlParams = new URLSearchParams(window.location.search);
             if (urlParams.has('year')) {
                 return urlParams.get('year');
             }
+            // 3. どちらもなければ現在年
             return new Date().getFullYear().toString();
         };
 
@@ -161,6 +279,9 @@
                 let source = getText('qt-financial_institution');
                 let category = "";
 
+                // クラスで見つからない場合、列インデックスで取得
+                // ユーザー情報: col 2=Amount(+/-), col 3=Amount(copy?), col 4=Source, col 5=Large, col 6=Middle
+                // よって、fallback処理のインデックスをそれに合わせる。
                 if ((!dateRaw || !content || !amountRaw) && cells.length >= 6) {
                     if (!dateRaw) dateRaw = cells[0]?.innerText.trim();
                     if (!content) content = cells[1]?.innerText.trim();
@@ -171,12 +292,14 @@
                     source = cells[4]?.innerText.trim();
                 }
 
+                // カテゴリの取得（大項目 + 中項目）
                 const catLarge = getText('qt-large_category') || (cells.length > 5 ? cells[5]?.innerText.trim() : "");
                 const catMiddle = getText('qt-middle_category') || (cells.length > 6 ? cells[6]?.innerText.trim() : "");
 
                 category = [catLarge, catMiddle].filter(c => c).join("/");
 
                 if (dateRaw && content && amountRaw) {
+                    // 日付の整形: "01/01(木)" -> "2026/01/01"
                     let date = dateRaw;
                     const dateMatch = dateRaw.match(/(\d{1,2})\/(\d{1,2})/);
                     if (dateMatch) {
@@ -187,6 +310,7 @@
                     const uniqueString = `${date}-${content}-${amount}-${source}-${category}`;
                     const hashId = CryptoJS.SHA256(uniqueString).toString(CryptoJS.enc.Hex);
 
+                    // GAS側のヘッダー "ID" に合わせるため、キーを "ID" (大文字) にする
                     data.push({ ID: hashId, date, content, amount, source, category });
                 }
             });
@@ -203,9 +327,12 @@
 
             let syncSettings;
             try {
+                // GASはリクエストボディの中身を単純なテキストとして返すこともある。
+                // 確実にJSONパースを試みる
                 syncSettings = JSON.parse(resConfig.responseText);
             } catch (e) {
                 console.error("Invalid Response:", resConfig.responseText.slice(0, 500));
+                // 認証エラーHTMLの場合
                 if (resConfig.responseText.trim().startsWith('<')) {
                     throw new Error("GASがHTMLエラーを返しました。\n\n【重要】GASのURLが『最新版』か確認してください。\n1. Tampermonkeyの機能メニューから「GAS URLを再設定」を選択\n2. GASのデプロイ管理画面で『最新の』ウェブアプリURLをコピーして設定\n※URLはデプロイのたびに変わる場合があります！");
                 }
@@ -320,108 +447,6 @@
             runSync(true);
         }
     });
-
-    // 指定された要素が消えるまで待つ関数
-    const waitForElementToDisappear = (...selectors) => {
-        return new Promise(resolve => {
-            const check = () => !selectors.some(s => document.querySelector(s));
-            if (check()) return resolve();
-
-            const observer = new MutationObserver(() => {
-                if (check()) {
-                    observer.disconnect();
-                    resolve();
-                }
-            });
-            observer.observe(document.body, { childList: true, subtree: true });
-        });
-    };
-
-    // GM_xmlhttpRequest を Promise 化したラッパー (CORS回避用)
-    const gmFetch = (url, options) => {
-        return new Promise((resolve, reject) => {
-            GM_xmlhttpRequest({
-                method: options.method || 'GET',
-                url: url,
-                headers: {
-                    "Content-Type": "text/plain;charset=utf-8"
-                },
-                data: options.body,
-                anonymous: true, // 公開ウェブアプリへのアクセスにはanonymous: trueが推奨（Cookie干渉回避）
-                onload: (response) => {
-                    if (response.status >= 200 && response.status < 300) {
-                        resolve(response);
-                    } else {
-                        reject(new Error(`HTTP Error: ${response.status} ${response.statusText}`));
-                    }
-                },
-                onerror: (err) => {
-                    reject(new Error("Network Error"));
-                }
-            });
-        });
-    };
-
-    // リトライ機能付きのfetch関数 (gmFetch使用)
-    const fetchWithRetry = async (url, options, retries = 3, delay = 3000) => {
-        for (let i = 0; i < retries; i++) {
-            try {
-                const response = await gmFetch(url, options);
-                return response;
-            } catch (error) {
-                console.warn(`Sync retry ${i + 1}/${retries}: ${error.message}`);
-                showStatus(`通信エラー... リトライ中 (${i + 1}/${retries})`);
-                if (i === retries - 1) throw error;
-                await new Promise(r => setTimeout(r, delay));
-            }
-        }
-    };
-
-    // 複数のセレクタを試して要素を探す関数
-    const waitForSyncTarget = (timeout = 10000) => {
-        const TARGET_SELECTORS = [
-            '#cf-detail-table tbody',
-            '#cf-detail-table',
-            'section.transaction-section',
-            '#transaction_list_body',
-            '.js-transaction_table tbody',
-            'table.transaction_table tbody'
-        ];
-
-        return new Promise((resolve, reject) => {
-            const find = () => {
-                for (const selector of TARGET_SELECTORS) {
-                    const el = document.querySelector(selector);
-                    if (el) return { el, selector };
-                }
-                return null;
-            };
-
-            const found = find();
-            if (found) return resolve(found);
-
-            const startTime = Date.now();
-            const observer = new MutationObserver(() => {
-                const found = find();
-                if (found) {
-                    observer.disconnect();
-                    resolve(found);
-                } else if (Date.now() - startTime > timeout) {
-                    observer.disconnect();
-                    reject(new Error(`Timeout waiting for targets: ${TARGET_SELECTORS.join(', ')}`));
-                }
-            });
-
-            observer.observe(document.body, { childList: true, subtree: true });
-
-            setTimeout(() => {
-                observer.disconnect();
-                const found = find();
-                if (found) resolve(found);
-                else reject(new Error(`Timeout waiting for targets: ${TARGET_SELECTORS.join(', ')}`));
-            }, timeout);
-        });
-    };
 
     // 初期化処理
     try {
