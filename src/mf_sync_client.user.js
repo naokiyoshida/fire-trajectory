@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         fire-trajectory-sync-client
 // @namespace    http://tampermonkey.net/
-// @version      3.16
+// @version      3.17
 // @description  Money Forward MEのデータをGASへ自動同期します。(URL強制遷移/ページリロード型)
 // @author       Naoki Yoshida
 // @match        https://moneyforward.com/cf*
@@ -314,6 +314,8 @@
 
         try {
             showStatus("設定確認中... (しばらくお待ちください)");
+
+            // 設定確認は行いますが、モードは「手動実行」の意図を最優先します
             const resConfig = await fetchWithRetry(gasUrl, {
                 method: "POST",
                 body: JSON.stringify({ action: "get_sync_config" })
@@ -323,7 +325,6 @@
             try {
                 config = JSON.parse(resConfig.responseText);
             } catch (e) {
-                console.warn("GAS Config Fetch Failed, using default.");
                 config = { mode: "Incremental" };
             }
 
@@ -334,9 +335,13 @@
             const currentMonth = now.getMonth() + 1;
 
             let monthsToSync = 6;
-            if (forceFull || config.mode === 'Full') {
+
+            // forceFullが指定された場合のみ、期間計算を行う（メニューの「通常同期」はGAS設定無視で6ヶ月固定）
+            if (forceFull) {
                 monthsToSync = (currentYear - TARGET_START_YEAR) * 12 + (currentMonth - TARGET_START_MONTH) + 1;
                 monthsToSync = Math.max(monthsToSync, 6);
+            } else if (config.mode === 'Full') {
+                console.log("GAS Config requested Full sync, but running inside manual 'Normal' mode (6 months).");
             }
 
             console.log(`【Plan】Syncing ${monthsToSync} months based on End Date: ${currentYear}/${currentMonth}`);
@@ -366,7 +371,6 @@
     GM_registerMenuCommand('強制フル同期 (2021/10〜)', () => startSync(true));
     GM_registerMenuCommand('通常同期を開始', () => startSync(false));
 
-    // 強制停止コマンド
     GM_registerMenuCommand('同期プロセスをリセット(停止)', async () => {
         await GM_setValue(KEY_SYNC_MODE, null);
         await GM_setValue(KEY_SYNC_QUEUE, '[]');
