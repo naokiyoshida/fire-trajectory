@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         fire-trajectory-sync-client
 // @namespace    http://tampermonkey.net/
-// @version      3.8
+// @version      3.9
 // @description  Money Forward MEのデータをGASへ自動同期します。Adaptive Syncにより初回52ヶ月/通常6ヶ月を自動判別。
 // @author       Naoki Yoshida
 // @match        https://moneyforward.com/cf*
@@ -193,6 +193,20 @@
             console.log(`Table[${i}]: id="${t.id}", class="${t.className}"`);
         });
         console.log("Main content check:", document.querySelector('#main') ? "Found" : "Not Found");
+        // ボタンも探してみる
+        const prevButtons = [
+            '#bda-in-closing-month-asset a:first-child',
+            '.transaction_list .pagination .prev a',
+            'button.btn-prev-month',
+            'a.fc-button-prev',
+            'a.btn-prev',
+            '.previous_month',
+            '#menu_range_prev'
+        ];
+        prevButtons.forEach(sel => {
+            console.log(`Checking button selector: ${sel} => ${document.querySelector(sel) ? "Found" : "Not Found"}`);
+        });
+
         console.groupEnd();
     };
 
@@ -280,8 +294,6 @@
                 let category = "";
 
                 // クラスで見つからない場合、列インデックスで取得
-                // ユーザー情報: col 2=Amount(+/-), col 3=Amount(copy?), col 4=Source, col 5=Large, col 6=Middle
-                // よって、fallback処理のインデックスをそれに合わせる。
                 if ((!dateRaw || !content || !amountRaw) && cells.length >= 6) {
                     if (!dateRaw) dateRaw = cells[0]?.innerText.trim();
                     if (!content) content = cells[1]?.innerText.trim();
@@ -292,14 +304,13 @@
                     source = cells[4]?.innerText.trim();
                 }
 
-                // カテゴリの取得（大項目 + 中項目）
+                // カテゴリの取得
                 const catLarge = getText('qt-large_category') || (cells.length > 5 ? cells[5]?.innerText.trim() : "");
                 const catMiddle = getText('qt-middle_category') || (cells.length > 6 ? cells[6]?.innerText.trim() : "");
 
                 category = [catLarge, catMiddle].filter(c => c).join("/");
 
                 if (dateRaw && content && amountRaw) {
-                    // 日付の整形: "01/01(木)" -> "2026/01/01"
                     let date = dateRaw;
                     const dateMatch = dateRaw.match(/(\d{1,2})\/(\d{1,2})/);
                     if (dateMatch) {
@@ -310,7 +321,6 @@
                     const uniqueString = `${date}-${content}-${amount}-${source}-${category}`;
                     const hashId = CryptoJS.SHA256(uniqueString).toString(CryptoJS.enc.Hex);
 
-                    // GAS側のヘッダー "ID" に合わせるため、キーを "ID" (大文字) にする
                     data.push({ ID: hashId, date, content, amount, source, category });
                 }
             });
@@ -356,12 +366,13 @@
             const monthsToSync = (forceFull || syncSettings.mode === 'Full') ? fullSyncMonths : 6;
 
             showStatus(`モード: ${forceFull ? '強制Full' : syncSettings.mode} (${monthsToSync}ヶ月) で同期開始`);
+            console.log(`【Debug】Syncing for ${monthsToSync} months.`);
 
             let allData = [];
 
             // 2. 複数月のデータをスクレイピング
             for (let i = 0; i < monthsToSync; i++) {
-                showStatus(`データ取得中: ${i + 1}ヶ月目`);
+                showStatus(`データ取得中: ${i + 1} / ${monthsToSync} ヶ月目`);
 
                 if (i > 0) await new Promise(r => setTimeout(r, 2000));
 
@@ -385,6 +396,7 @@
                         const btn = document.querySelector(sel);
                         if (btn) {
                             prevMonthButton = btn;
+                            console.log(`【Debug】Found prev button with selector: ${sel}`);
                             break;
                         }
                     }
@@ -393,15 +405,17 @@
                         try {
                             prevMonthButton.click();
                             await waitForElementToDisappear('#loading', '#loading-overlay', '.loading-spinner');
+                            // 遷移後の待機時間を少し確保
+                            await new Promise(r => setTimeout(r, 1500));
                         } catch (err) {
                             console.warn("ページ遷移エラー", err);
                             break;
                         }
                     } else {
-                        if (i === 0) {
-                            showStatus("エラー: 移動ボタンが見つかりません", 5000, true);
-                            diagnoseDOM();
-                        }
+                        console.warn(`【Debug】Month ${i + 1}: Previous month button NOT found.`);
+                        console.warn(`Tried selectors: ${prevButtons.join(', ')}`);
+                        showStatus("エラー: 移動ボタンが見つかりません", 5000, true);
+                        diagnoseDOM();
                         break;
                     }
                 }
