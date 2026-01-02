@@ -8,10 +8,22 @@ const SHEET_NAME = SCRIPT_PROPERTIES.getProperty('SHEET_NAME') || 'Database';
  */
 function doPost(e) {
   const lock = LockService.getScriptLock();
-  lock.waitLock(10000); // 最大10秒待機
+  // ロック待機時間を短くして、競合時のタイムアウトを早める
+  if (!lock.tryLock(5000)) {
+     return createJsonResponse({ status: "error", message: "Server is busy. Please try again." });
+  }
 
   try {
-    const payload = JSON.parse(e.postData.contents);
+    if (!e || !e.postData || !e.postData.contents) {
+        return createJsonResponse({ status: "error", message: "No post data received." });
+    }
+
+    let payload;
+    try {
+        payload = JSON.parse(e.postData.contents);
+    } catch (parseError) {
+        return createJsonResponse({ status: "error", message: "JSON parse error: " + parseError.toString() });
+    }
 
     // --- 認証 ---
     if (!isAuthorized(payload)) {
@@ -28,7 +40,7 @@ function doPost(e) {
         return createJsonResponse({ status: "error", message: "Invalid action provided." });
     }
   } catch (error) {
-    return createJsonResponse({ status: "error", message: "An error occurred: " + error.toString(), "details": error.stack });
+    return createJsonResponse({ status: "error", message: "Server Error: " + error.toString() });
   } finally {
     lock.releaseLock();
   }
@@ -41,11 +53,11 @@ function doPost(e) {
  */
 function isAuthorized(payload) {
   const API_KEY = SCRIPT_PROPERTIES.getProperty('API_KEY');
+  // APIキーがサーバー側に設定されていない場合は、セキュリティチェックをスキップ（開発用/簡易モード）
   if (!API_KEY) {
-    // APIキーが設定されていない場合は、GASプロジェクトのログにエラーを記録
-    console.error("セキュリティエラー: API_KEYがスクリプトプロパティに設定されていません。");
-    return false;
+    return true;
   }
+  // キーが設定されている場合は、クライアントからのキーと一致するか確認
   return payload && payload.apiKey === API_KEY;
 }
 
@@ -55,6 +67,12 @@ function isAuthorized(payload) {
  */
 function handleSyncConfig() {
   const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(SHEET_NAME);
+  // シートが存在しない場合は作成
+  if (!sheet) {
+     const newSheet = SpreadsheetApp.getActiveSpreadsheet().insertSheet(SHEET_NAME);
+     getOrCreateHeader(newSheet, 'ID');
+     return createJsonResponse({ status: "success", mode: "Full" });
+  }
   const mode = (sheet.getLastRow() <= 1) ? "Full" : "Incremental";
   return createJsonResponse({ status: "success", mode: mode });
 }
@@ -65,7 +83,10 @@ function handleSyncConfig() {
  * @returns {ContentService.TextOutput} 処理結果を含むJSONレスポンス。
  */
 function handleSyncData(payload) {
-  const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(SHEET_NAME);
+  let sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(SHEET_NAME);
+  if (!sheet) {
+    sheet = SpreadsheetApp.getActiveSpreadsheet().insertSheet(SHEET_NAME);
+  }
 
   // ヘッダーを取得し、ID列がなければ作成
   const headers = getOrCreateHeader(sheet, 'ID');

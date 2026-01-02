@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         fire-trajectory-sync-client
 // @namespace    http://tampermonkey.net/
-// @version      3.2
+// @version      3.3
 // @description  Money Forward MEのデータをGASへ自動同期します。Adaptive Syncにより初回52ヶ月/通常6ヶ月を自動判別。
 // @author       Naoki Yoshida
 // @match        https://moneyforward.com/cf*
@@ -108,12 +108,10 @@
                 method: options.method || 'GET',
                 url: url,
                 headers: {
-                    // text/plain にすることでプリフライトリクエストを回避しやすくする
-                    // GAS側は postData.contents で生データを受け取れる
-                    "Content-Type": "text/plain"
+                    "Content-Type": "text/plain;charset=utf-8"
                 },
                 data: options.body,
-                anonymous: true, // 重要: ブラウザのCookie(ログイン状態)を送信しない
+                // anonymous: true, // 今回は外してみる。
                 onload: (response) => {
                     if (response.status >= 200 && response.status < 300) {
                         resolve(response);
@@ -218,7 +216,6 @@
             }
         }
 
-        // ターゲット要素を特定
         let activeSelector = null;
         try {
             const result = await waitForSyncTarget(5000);
@@ -295,14 +292,16 @@
 
             let syncSettings;
             try {
+                // GASはリクエストボディの中身を単純なテキストとして返すこともある。
+                // 確実にJSONパースを試みる
                 syncSettings = JSON.parse(resConfig.responseText);
             } catch (e) {
                 console.error("Invalid Response:", resConfig.responseText.slice(0, 500));
-                // HTMLが返ってくる場合、認証情報（Cookie）が干渉している可能性がある
+                // 認証エラーHTMLの場合
                 if (resConfig.responseText.trim().startsWith('<')) {
-                    throw new Error("GASがHTMLエラーを返しました。\n設定は「全員」になっていますが、ブラウザのGoogleログイン状態が干渉している可能性があります。\nスクリプトの更新(anonymousモード)で解消されるか、\nまたはシークレットウィンドウで試してください。");
+                    throw new Error("GASがHTMLエラーを返しました。\n設定は「全員」になっていますが、Googleのセキュリティ制限(V8 runtime等)の影響が考えられます。\nお手数ですが、一度ブラウザのシークレットモードで試してみてください。");
                 }
-                throw new Error("GASからの応答が不正です (JSONパースエラー)");
+                throw new Error("GASからの応答が不正です (JSONパースエラー): " + e.message);
             }
 
             if (syncSettings.status === 'error') throw new Error(syncSettings.message);
