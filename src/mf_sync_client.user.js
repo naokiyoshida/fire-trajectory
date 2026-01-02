@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         fire-trajectory-sync-client
 // @namespace    http://tampermonkey.net/
-// @version      3.5
+// @version      3.6
 // @description  Money Forward MEのデータをGASへ自動同期します。Adaptive Syncにより初回52ヶ月/通常6ヶ月を自動判別。
 // @author       Naoki Yoshida
 // @match        https://moneyforward.com/cf*
@@ -284,19 +284,26 @@
                 let category = "";
 
                 // クラスで見つからない場合、列インデックスで取得
-                if ((!dateRaw || !content || !amountRaw) && cells.length >= 5) {
+                // ユーザー情報: col 2=Amount(+/-), col 3=Amount(copy?), col 4=Source, col 5=Large, col 6=Middle
+                // よって、fallback処理のインデックスをそれに合わせる。
+                if ((!dateRaw || !content || !amountRaw) && cells.length >= 6) {
                     if (!dateRaw) dateRaw = cells[0]?.innerText.trim();
                     if (!content) content = cells[1]?.innerText.trim();
                     if (!amountRaw) amountRaw = cells[2]?.querySelector('span')?.innerText.trim() || cells[2]?.innerText.trim();
                 }
 
-                if (!source && cells.length > 3) {
-                    source = cells[3]?.innerText.trim();
+                if (!source && cells.length > 4) {
+                    source = cells[4]?.innerText.trim();
                 }
 
                 // カテゴリの取得（大項目 + 中項目）
-                const catLarge = getText('qt-large_category') || (cells.length > 4 ? cells[4]?.innerText.trim() : "");
-                const catMiddle = getText('qt-middle_category') || (cells.length > 5 ? cells[5]?.innerText.trim() : "");
+                // col 5 = 大項目, col 6 = 中項目 と仮定 (indexは0始まりなので 4 と 5 の可能性もあるが、前回の結果 "Source/Category" が source=cells[3], cat=cells[4] でずれていた)
+                // Source(-1) が cells[3] だったので、Source should be cells[4].
+                // Category should be cells[5] and cells[6].
+
+                const catLarge = getText('qt-large_category') || (cells.length > 5 ? cells[5]?.innerText.trim() : "");
+                const catMiddle = getText('qt-middle_category') || (cells.length > 6 ? cells[6]?.innerText.trim() : "");
+
                 category = [catLarge, catMiddle].filter(c => c).join("/");
 
                 if (dateRaw && content && amountRaw) {
