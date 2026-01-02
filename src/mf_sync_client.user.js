@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         fire-trajectory-sync-client
 // @namespace    http://tampermonkey.net/
-// @version      3.4
+// @version      3.5
 // @description  Money Forward MEのデータをGASへ自動同期します。Adaptive Syncにより初回52ヶ月/通常6ヶ月を自動判別。
 // @author       Naoki Yoshida
 // @match        https://moneyforward.com/cf*
@@ -227,6 +227,7 @@
 
         const scrapeCurrentPage = () => {
             if (!activeSelector || !document.querySelector(activeSelector)) {
+                // 再検出
                 const targets = [
                     '#cf-detail-table tbody',
                     '#cf-detail-table',
@@ -249,34 +250,69 @@
             return scrapeFromElement(currentBody);
         };
 
+        // ページから年を取得する関数
+        const getYearFromPage = () => {
+            // 1. カレンダーのヘッダーから取得 (例: "2024年1月")
+            const headerTitle = document.querySelector('.fc-header-title');
+            if (headerTitle) {
+                const match = headerTitle.innerText.match(/(\d{4})年/);
+                if (match) return match[1];
+            }
+            // 2. URLパラメータから取得
+            const urlParams = new URLSearchParams(window.location.search);
+            if (urlParams.has('year')) {
+                return urlParams.get('year');
+            }
+            // 3. どちらもなければ現在年
+            return new Date().getFullYear().toString();
+        };
+
         const scrapeFromElement = (element) => {
             const rows = element.querySelectorAll('tr');
             const data = [];
+            const pageYear = getYearFromPage();
+
             rows.forEach(row => {
                 const getText = (cls) => row.querySelector(`.${cls}`)?.innerText.trim();
+                const cells = row.querySelectorAll('td');
 
-                let date = getText('date');
+                let dateRaw = getText('date');
                 let content = getText('content');
                 let amountRaw = getText('amount');
-                let source = getText('source') || row.querySelector('.account')?.innerText.trim();
-                let category = getText('category') || row.querySelector('.category-name')?.innerText.trim();
+                // #cf-detail-table の場合、金融機関は col 3, 大項目=col 4, 中項目=col 5
+                let source = getText('qt-financial_institution');
+                let category = "";
 
-                if (!date || !content || !amountRaw) {
-                    const cells = row.querySelectorAll('td');
-                    if (cells.length >= 5) {
-                        if (!date) date = cells[0]?.innerText.trim();
-                        if (!content) content = cells[1]?.innerText.trim();
-                        if (!amountRaw) amountRaw = cells[2]?.querySelector('span')?.innerText.trim() || cells[2]?.innerText.trim();
-                        if (!source) source = cells[3]?.innerText.trim();
-                        if (!category) category = cells[4]?.innerText.trim();
-                    }
+                // クラスで見つからない場合、列インデックスで取得
+                if ((!dateRaw || !content || !amountRaw) && cells.length >= 5) {
+                    if (!dateRaw) dateRaw = cells[0]?.innerText.trim();
+                    if (!content) content = cells[1]?.innerText.trim();
+                    if (!amountRaw) amountRaw = cells[2]?.querySelector('span')?.innerText.trim() || cells[2]?.innerText.trim();
                 }
 
-                if (date && content && amountRaw) {
+                if (!source && cells.length > 3) {
+                    source = cells[3]?.innerText.trim();
+                }
+
+                // カテゴリの取得（大項目 + 中項目）
+                const catLarge = getText('qt-large_category') || (cells.length > 4 ? cells[4]?.innerText.trim() : "");
+                const catMiddle = getText('qt-middle_category') || (cells.length > 5 ? cells[5]?.innerText.trim() : "");
+                category = [catLarge, catMiddle].filter(c => c).join("/");
+
+                if (dateRaw && content && amountRaw) {
+                    // 日付の整形: "01/01(木)" -> "2026/01/01"
+                    let date = dateRaw;
+                    const dateMatch = dateRaw.match(/(\d{1,2})\/(\d{1,2})/);
+                    if (dateMatch) {
+                        date = `${pageYear}/${dateMatch[1].padStart(2, '0')}/${dateMatch[2].padStart(2, '0')}`;
+                    }
+
                     const amount = amountRaw.replace(/[,円\s]/g, '');
                     const uniqueString = `${date}-${content}-${amount}-${source}-${category}`;
                     const hashId = CryptoJS.SHA256(uniqueString).toString(CryptoJS.enc.Hex);
-                    data.push({ id: hashId, date, content, amount, source, category });
+
+                    // GAS側のヘッダー "ID" に合わせるため、キーを "ID" (大文字) にする
+                    data.push({ ID: hashId, date, content, amount, source, category });
                 }
             });
             return data;
@@ -359,7 +395,7 @@
                 }
             }
 
-            const uniqueData = allData.filter((v, i, a) => a.findIndex(t => t.id === v.id) === i);
+            const uniqueData = allData.filter((v, i, a) => a.findIndex(t => t.ID === v.ID) === i);
             showStatus(`${uniqueData.length}件のデータを送信中...`);
 
             // 3. GASへデータを送信
