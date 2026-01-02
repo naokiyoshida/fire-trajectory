@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         fire-trajectory-sync-client
 // @namespace    http://tampermonkey.net/
-// @version      3.10
+// @version      3.11
 // @description  Money Forward MEのデータをGASへ自動同期します。Adaptive Syncにより初回52ヶ月/通常6ヶ月を自動判別。
 // @author       Naoki Yoshida
 // @match        https://moneyforward.com/cf*
@@ -265,19 +265,32 @@
 
         // ページから年を取得する関数
         const getYearFromPage = () => {
-            // 1. カレンダーのヘッダーから取得 (例: "2024年1月")
-            const headerTitle = document.querySelector('.fc-header-title');
-            if (headerTitle) {
-                const match = headerTitle.innerText.match(/(\d{4})年/);
-                if (match) return match[1];
-            }
-            // 2. URLパラメータから取得
+            // 1. URLパラメータから取得 (最優先)
             const urlParams = new URLSearchParams(window.location.search);
             if (urlParams.has('year')) {
                 return urlParams.get('year');
             }
-            // 3. どちらもなければ現在年
-            return new Date().getFullYear().toString();
+
+            // 2. カレンダーのヘッダーから取得 (例: "2024年1月", "2024 年 1 月")
+            const headerTitle = document.querySelector('.fc-header-title');
+            if (headerTitle) {
+                // 空白や改行を除去してからマッチさせる
+                const text = headerTitle.innerText.replace(/\s+/g, '');
+                const match = text.match(/(\d{4})年/);
+                if (match) return match[1];
+            }
+
+            // 3. 画面内の日付表示から推測 (例: 前月ボタンの隣など)
+            const rangeDisplay = document.querySelector('.transaction-range-display');
+            if (rangeDisplay) {
+                const match = rangeDisplay.innerText.match(/(\d{4})年/);
+                if (match) return match[1];
+            }
+
+            // 4. フォールバック: 現在年 (ただし警告を出す)
+            const currentYear = new Date().getFullYear().toString();
+            console.warn(`【Warning】Year could not be determined from page. Using current year: ${currentYear}`);
+            return currentYear;
         };
 
         const scrapeFromElement = (element) => {
@@ -314,9 +327,12 @@
 
                 if (dateRaw && content && amountRaw) {
                     let date = dateRaw;
-                    const dateMatch = dateRaw.match(/(\d{1,2})\/(\d{1,2})/);
+                    // "01/01(木)" や "8/28" などを "YYYY/MM/DD" に正規化
+                    const dateMatch = dateRaw.match(/(\d{1,2})\s*[\/／]\s*(\d{1,2})/);
                     if (dateMatch) {
-                        date = `${pageYear}/${dateMatch[1].padStart(2, '0')}/${dateMatch[2].padStart(2, '0')}`;
+                        const m = dateMatch[1].padStart(2, '0');
+                        const d = dateMatch[2].padStart(2, '0');
+                        date = `${pageYear}/${m}/${d}`;
                     }
 
                     const amount = amountRaw.replace(/[,円\s]/g, '');
@@ -429,7 +445,9 @@
                         } else {
                             const headerTitle = document.querySelector('.fc-header-title');
                             if (headerTitle) {
-                                const match = headerTitle.innerText.match(/(\d{1,2})月/);
+                                // 2024年12月 => 12
+                                const text = headerTitle.innerText.replace(/\s+/g, '');
+                                const match = text.match(/(\d{1,2})月/);
                                 if (match) currentMonthStr = match[1];
                             }
                         }
