@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         fire-trajectory-sync-client
 // @namespace    http://tampermonkey.net/
-// @version      2.4
+// @version      2.5
 // @description  Money Forward MEのデータをGASへ自動同期します。Adaptive Syncにより初回52ヶ月/通常6ヶ月を自動判別。
 // @author       Naoki Yoshida
 // @match        https://moneyforward.com/cf*
@@ -109,10 +109,12 @@
     // 複数のセレクタを試して要素を探す関数
     const waitForSyncTarget = (timeout = 10000) => {
         const TARGET_SELECTORS = [
-            '#transaction_list_body',       // オリジナル
-            '.js-transaction_table tbody',  // クラスベース
-            'table.transaction_table tbody', // 構造ベース
-            'section.transaction-section'   // セクション全体
+            '#cf-detail-table tbody',       // 診断ログで見つかったテーブル (最優先)
+            '#cf-detail-table',             // tbodyがない場合
+            'section.transaction-section',  // セクション全体
+            '#transaction_list_body',       // 旧ターゲット
+            '.js-transaction_table tbody',
+            'table.transaction_table tbody'
         ];
 
         return new Promise((resolve, reject) => {
@@ -177,12 +179,11 @@
             }
         }
 
-        // ターゲット要素を特定
-        let targetBody = null;
+        let activeSelector = null;
         try {
             const result = await waitForSyncTarget(10000); // 10秒待機
-            targetBody = result.el;
-            console.log(`【fire-trajectory】対象テーブルを検出しました (Selector: ${result.selector})`);
+            activeSelector = result.selector; // 成功したセレクタを記憶
+            console.log(`【fire-trajectory】対象テーブルを検出しました (Selector: ${activeSelector})`);
         } catch (e) {
             showStatus("エラー: 明細表が見つかりません", 10000);
             console.error(e);
@@ -191,30 +192,54 @@
         }
 
         const scrapeCurrentPage = () => {
-            // 再取得 (tbodyがなければ table 全体から探すなど柔軟に)
-            const currentBody = document.querySelector('#transaction_list_body') ||
-                document.querySelector('.js-transaction_table tbody') ||
-                document.querySelector('table.transaction_table tbody');
+            // 検出済みのセレクタを使用して要素を取得
+            let currentBody = document.querySelector(activeSelector);
 
             if (!currentBody) {
-                console.warn("明細テーブルが再取得できません");
-                return [];
+                console.warn(`明細テーブルが再取得できません (Selector: ${activeSelector}) - 再検索します`);
+                const fallbackRes = document.querySelector('#cf-detail-table tbody') || document.querySelector('#cf-detail-table');
+                if (fallbackRes) {
+                    currentBody = fallbackRes;
+                } else {
+                    return [];
+                }
             }
+            return scrapeFromElement(currentBody);
+        };
 
-            const rows = currentBody.querySelectorAll('tr');
+        const scrapeFromElement = (element) => {
+            const rows = element.querySelectorAll('tr');
             const data = [];
             rows.forEach(row => {
                 // セレクタを少し緩くする (クラス名が完全一致でなくても部分一致などで取れるように調整)
                 const getText = (cls) => row.querySelector(`.${cls}`)?.innerText.trim();
 
-                const date = getText('date');
-                const content = getText('content');
-                const amountRaw = getText('amount');
-                const source = getText('source') || row.querySelector('.account')?.innerText.trim(); // source または account
-                const category = getText('category'); // 大項目・中項目が結合されている場合がある
+                // クラス名での取得を試みる
+                let date = getText('date');
+                let content = getText('content');
+                let amountRaw = getText('amount');
+                let source = getText('source') || row.querySelector('.account')?.innerText.trim();
+                let category = getText('category') || row.querySelector('.category-name')?.innerText.trim();
 
-                if (date && content && amountRaw) { // 最低限これらがあれば良しとする
+                // クラス名で取れない場合のフォールバック (列の位置固定と仮定: cf-detail-table向け)
+                if (!date || !content || !amountRaw) {
+                    const cells = row.querySelectorAll('td');
+                    // 通常の家計簿列構成: 0:日付, 1:項目, 2:金額, 3:保有金融機関, 4:大項目, 5:中項目, 6:メモ, ...
+                    // cf-detail-tableクラス構造からの推測
+                    if (cells.length >= 5) {
+                        // 日付カラムが特定できない場合、1列目などを試行
+                        if (!date) date = cells[0]?.innerText.trim();
+                        if (!content) content = cells[1]?.innerText.trim();
+                        if (!amountRaw) amountRaw = cells[2]?.querySelector('span')?.innerText.trim() || cells[2]?.innerText.trim();
+                        if (!source) source = cells[3]?.innerText.trim();
+                        if (!category) category = cells[4]?.innerText.trim();
+                    }
+                }
+
+                // 必須項目のチェック (日付・内容・金額があれば有効な明細とみなす)
+                if (date && content && amountRaw) {
                     const amount = amountRaw.replace(/[,円\s]/g, '');
+                    // 重複排除用のハッシュID生成
                     const uniqueString = `${date}-${content}-${amount}-${source}-${category}`;
                     const hashId = CryptoJS.SHA256(uniqueString).toString(CryptoJS.enc.Hex);
                     data.push({ id: hashId, date, content, amount, source, category });
@@ -242,32 +267,37 @@
             for (let i = 0; i < monthsToSync; i++) {
                 showStatus(`データ取得中: ${i + 1}ヶ月目`);
 
-                if (i > 0) await new Promise(r => setTimeout(r, 1500)); // ページ遷移後の描画待ちを少し長めに
+                if (i > 0) await new Promise(r => setTimeout(r, 1500));
 
                 const data = scrapeCurrentPage();
                 console.log(`Month ${i + 1}: ${data.length} items found.`);
                 allData.push(...data);
 
                 if (i < monthsToSync - 1) {
-                    // 「前の月へ」ボタンのセレクタも強化
+                    // 「前の月へ」ボタンのセレクタ
                     const prevButtons = [
                         '#bda-in-closing-month-asset a:first-child', // 振替なし表示
                         '.transaction_list .pagination .prev a',     // 一般的なページネーション
-                        'a.btn-check-previous-month',                 // 仮定: ボタンクラス
-                        '.fc-header-left .fc-button-prev'            // カレンダー形式の場合?
+                        'button.btn-prev-month',                     // ボタンタグの場合
+                        'a.fc-button-prev',                           // カレンダーライク
+                        'a.btn-prev',
+                        '.previous_month'
                     ];
 
                     let prevMonthButton = null;
                     for (const sel of prevButtons) {
-                        prevMonthButton = document.querySelector(sel);
-                        if (prevMonthButton) break;
+                        const btn = document.querySelector(sel);
+                        // textContentで "前" を含むかもチェックするとより安全
+                        if (btn) {
+                            prevMonthButton = btn;
+                            break;
+                        }
                     }
 
                     if (prevMonthButton) {
                         try {
                             prevMonthButton.click();
-                            // ローディング表示があれば消えるのを待つ
-                            await waitForElementToDisappear('#loading', '#loading-overlay');
+                            await waitForElementToDisappear('#loading', '#loading-overlay', '.loading-spinner');
                         } catch (err) {
                             console.warn("ページ遷移エラー", err);
                             break;
