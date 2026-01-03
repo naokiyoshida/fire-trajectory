@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         fire-trajectory-sync-client
 // @namespace    http://tampermonkey.net/
-// @version      3.40
+// @version      3.41
 // @description  Money Forward MEのデータをGASへ自動同期します。(SPAボタン連打/論理カウンター版)
 // @author       Naoki Yoshida
 // @match        https://moneyforward.com/cf*
@@ -266,7 +266,7 @@
     GM_registerMenuCommand('GAS URLを再設定', promptAndSetGasUrl);
 
     addStyles();
-    console.log("MF Sync: v3.40 Logical SPA mode ready.");
+    console.log("MF Sync: v3.41 Logical SPA mode ready.");
 
     // --- 自動実行チェックと初期化 ---
     const autoSyncCheck = async () => {
@@ -274,17 +274,29 @@
         const now = Date.now();
         const oneDay = 24 * 60 * 60 * 1000;
 
-        // 最終同期から1日以上経過、かつ、URLが cf (入出金) のメインページであることを確認
-        if (now - lastSync > oneDay && window.location.pathname.startsWith('/cf')) {
+        console.log(`MF Sync: Auto-sync check. Last sync: ${new Date(lastSync).toLocaleString()}. Elapsed: ${Math.floor((now - lastSync) / 3600000)} hours.`);
+
+        // 最終同期から1日以上経過、かつ、URLが cf (入出金) のページであることを確認
+        if (now - lastSync > oneDay) {
+            console.log("MF Sync: Condition met. Waiting for table...");
+            showStatus("オート同期をチェック中...", 3000);
+
             // テーブルが出るまで待つ
             let checkRetry = 0;
             const checkReady = setInterval(() => {
-                if (document.querySelector('#cf-detail-table, #transaction_list_body, .js-transaction_table')) {
+                const table = document.querySelector('#cf-detail-table, #transaction_list_body, .js-transaction_table');
+                if (table) {
                     clearInterval(checkReady);
+                    console.log("MF Sync: Table found. Starting sync flow.");
                     runSyncFlow(false, true);
                 }
-                if (++checkRetry > 20) clearInterval(checkReady); // 最大10秒待機
+                if (++checkRetry > 40) { // 最大20秒待機に延長
+                    console.warn("MF Sync: Auto-sync timed out waiting for table.");
+                    clearInterval(checkReady);
+                }
             }, 500);
+        } else {
+            console.log("MF Sync: Auto-sync skipped (not enough time passed).");
         }
     };
 
