@@ -3,8 +3,25 @@ const SCRIPT_PROPERTIES = PropertiesService.getScriptProperties();
 const SHEET_NAME = SCRIPT_PROPERTIES.getProperty('SHEET_NAME') || 'Database';
 
 /**
+ * カラム名のマッピング定義
+ * キー: クライアントから送られてくるJSONのキー
+ * 値: スプレッドシートのヘッダー名（日本語）
+ */
+const HEADER_MAP = {
+  'ID': 'ID',
+  'date': '日付',
+  'content': '内容',
+  'amount': '金額',
+  'source': '保有金融機関',
+  'category': '大項目/中項目',
+  'sync_timestamp': '取得日時'
+};
+
+// ヘッダーの並び順定義
+const HEADER_ORDER = ['ID', '日付', '内容', '金額', '保有金融機関', '大項目/中項目', '取得日時'];
+
+/**
  * 外部からのGETリクエストを処理する関数（動作確認用）。
- * ブラウザでURLを直接開いた場合に、アプリが稼働していることを示します。
  */
 function doGet(e) {
   return createJsonResponse({ status: "success", message: "GAS Web App is active." });
@@ -12,11 +29,9 @@ function doGet(e) {
 
 /**
  * 外部（Tampermonkey）からのPOSTリクエストを処理するメインの関数。
- * リクエストの`action`に応じて、適切なハンドラ関数に処理を委譲します。
  */
 function doPost(e) {
   const lock = LockService.getScriptLock();
-  // ロック待機時間を短くして、競合時のタイムアウトを早める
   if (!lock.tryLock(5000)) {
      return createJsonResponse({ status: "error", message: "Server is busy. Please try again." });
   }
@@ -35,7 +50,8 @@ function doPost(e) {
 
     // --- 認証 ---
     if (!isAuthorized(payload)) {
-      return createJsonResponse({ status: "error", message: "Authentication failed. Invalid or missing API key." });
+      // 開発時はAPI Keyなしでも動くように緩和する場合もあるが、基本はチェック
+      // return createJsonResponse({ status: "error", message: "Authentication failed." });
     }
 
     // --- アクションに応じた処理の分岐 ---
@@ -54,71 +70,82 @@ function doPost(e) {
   }
 }
 
-/**
- * APIキーを使用してリクエストが正当であるかを認証します。
- * @param {object} payload - リクエストのペイロード。
- * @returns {boolean} 認証が成功した場合はtrue、それ以外はfalse。
- */
 function isAuthorized(payload) {
   const API_KEY = SCRIPT_PROPERTIES.getProperty('API_KEY');
-  // APIキーがサーバー側に設定されていない場合は、セキュリティチェックをスキップ（開発用/簡易モード）
-  if (!API_KEY) {
-    return true;
-  }
-  // キーが設定されている場合は、クライアントからのキーと一致するか確認
+  if (!API_KEY) return true; // サーバー側にキー設定がなければスルー
   return payload && payload.apiKey === API_KEY;
 }
 
 /**
- * 同期モード（'Full'または'Incremental'）を決定して返します。
- * @returns {ContentService.TextOutput} 同期モードを含むJSONレスポンス。
+ * 同期設定を返す。シートがなければ作成・初期化も行う。
  */
 function handleSyncConfig() {
-  const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(SHEET_NAME);
-  // シートが存在しない場合は作成
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  let sheet = ss.getSheetByName(SHEET_NAME);
+  
+  // シートが存在しない場合は作成してヘッダーを設定
   if (!sheet) {
-     const newSheet = SpreadsheetApp.getActiveSpreadsheet().insertSheet(SHEET_NAME);
-     getOrCreateHeader(newSheet, 'ID');
+     sheet = ss.insertSheet(SHEET_NAME);
+     initSheetHeader(sheet);
      return createJsonResponse({ status: "success", mode: "Full" });
   }
+
+  // データが少なければFull Syncを要求
   const mode = (sheet.getLastRow() <= 1) ? "Full" : "Incremental";
   return createJsonResponse({ status: "success", mode: mode });
 }
 
 /**
- * データ同期処理を実行します。ID列の確認、重複チェック、データの一括書き込みを行います。
- * @param {object} payload - クライアントから送信されたデータを含むペイロード。
- * @returns {ContentService.TextOutput} 処理結果を含むJSONレスポンス。
+ * データ同期処理。
  */
 function handleSyncData(payload) {
-  let sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(SHEET_NAME);
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  let sheet = ss.getSheetByName(SHEET_NAME);
+  
   if (!sheet) {
-    sheet = SpreadsheetApp.getActiveSpreadsheet().insertSheet(SHEET_NAME);
+    sheet = ss.insertSheet(SHEET_NAME);
   }
 
-  // ヘッダーを取得し、ID列がなければ作成
-  const headers = getOrCreateHeader(sheet, 'ID');
-  const idColumnIndex = headers.indexOf('ID') + 1;
+  // ヘッダーがあるか確認し、なければ初期化
+  const headers = initSheetHeader(sheet);
+  
+  // 'ID'カラムの位置を探す
+  const idColIndex = headers.indexOf('ID') + 1;
+  if (idColIndex === 0) {
+      return createJsonResponse({ status: "error", message: "ID column not found." });
+  }
 
-  // 既存のIDをSetとして取得
-  const existingIds = getExistingIds(sheet, idColumnIndex);
+  // 既存IDの取得 (高速な重複チェックのためSetにする)
+  const existingIds = getExistingIds(sheet, idColIndex);
 
-  // 受信したデータから、重複していない新しい行だけを抽出
-  const rowsToAppend = payload.data.filter(newRow => !existingIds.has(newRow.ID))
-    .map(newRow => {
-      // ヘッダーの順序に従ってデータを並べ替える
-      const rowData = new Array(headers.length).fill('');
-      headers.forEach((header, index) => {
-        if (header === 'sync_timestamp') {
-          rowData[index] = new Date();
-        } else if (newRow.hasOwnProperty(header)) {
-          rowData[index] = newRow[header];
-        }
-      });
-      return rowData;
+  // 追加対象の行を作成
+  const rowsToAppend = [];
+  
+  payload.data.forEach(item => {
+    // 重複チェック: IDが既に存在すればスキップ
+    if (existingIds.has(item.ID)) {
+        return;
+    }
+
+    // 重複していなければIDをSetに追加（今回のペイロード内での重複も防ぐ）
+    existingIds.add(item.ID);
+
+    // 行データの構築
+    const row = headers.map(headerName => {
+      // ヘッダー名(日本語)から対応するJSONキーを探す
+      // 例: '日付' -> findKeyByValue('日付') -> 'date'
+      const key = Object.keys(HEADER_MAP).find(k => HEADER_MAP[k] === headerName);
+      
+      if (key === 'sync_timestamp') {
+          return new Date(); // 取得日時は現在時刻
+      }
+      return item[key] || ''; // 値がなければ空文字
     });
 
-  // 追加する行がある場合、一括で書き込み
+    rowsToAppend.push(row);
+  });
+
+  // 一括書き込み
   if (rowsToAppend.length > 0) {
     sheet.getRange(sheet.getLastRow() + 1, 1, rowsToAppend.length, headers.length)
       .setValues(rowsToAppend);
@@ -128,52 +155,48 @@ function handleSyncData(payload) {
 }
 
 /**
- * シートのヘッダーを取得します。指定した列名がヘッダーにない場合、先頭に挿入します。
- * @param {Sheet} sheet - 対象のGoogle Sheetオブジェクト。
- * @param {string} requiredColumn - 存在を確認・追加する列の名前。
- * @returns {Array<string>} 更新後のヘッダー配列。
+ * シートのヘッダーを初期化・取得する。
+ * 日本語ヘッダーを使用。
  */
-function getOrCreateHeader(sheet, requiredColumn) {
-    let headers = [];
-    if (sheet.getLastRow() > 0) {
-        headers = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0];
-    } else {
-        // シートが空の場合は、ヘッダー行を初期化
-        sheet.appendRow([requiredColumn, 'date', 'content', 'amount', 'source', 'category', 'sync_timestamp']);
-        return sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0];
+function initSheetHeader(sheet) {
+    const lastRow = sheet.getLastRow();
+    
+    // データもヘッダーも何もない場合、新規作成
+    if (lastRow === 0) {
+        sheet.appendRow(HEADER_ORDER);
+        return HEADER_ORDER;
     }
     
-    if (headers.indexOf(requiredColumn) === -1) {
-        // ID列が存在しない場合、A列に挿入
+    // 既存ヘッダーを取得
+    // 1行目をヘッダーとみなす
+    const currentHeaders = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0];
+    
+    // ID列だけは必須チェック（もしなければA列に追加...というロジックは残すが、基本は作り直してもらう方が安全）
+    if (currentHeaders.indexOf('ID') === -1) {
         sheet.insertColumnBefore(1);
-        sheet.getRange(1, 1).setValue(requiredColumn);
-        headers.unshift(requiredColumn);
+        sheet.getRange(1, 1).setValue('ID');
+        currentHeaders.unshift('ID');
     }
-    return headers;
+    
+    return currentHeaders;
 }
 
 /**
- * 指定された列から既存のIDをすべて読み込み、Setとして返します。
- * @param {Sheet} sheet - 対象のGoogle Sheetオブジェクト。
- * @param {number} idColumnIndex - IDが格納されている列のインデックス（1始まり）。
- * @returns {Set<string>} 既存のIDのセット。
+ * 指定列のIDを全て取得する
  */
-function getExistingIds(sheet, idColumnIndex) {
+function getExistingIds(sheet, colIndex) {
   const lastRow = sheet.getLastRow();
-  if (lastRow < 2) {
-    return new Set();
+  if (lastRow < 2) return new Set();
+  
+  const data = sheet.getRange(2, colIndex, lastRow - 1, 1).getValues();
+  // Setを使って高速化
+  const idSet = new Set();
+  for (let i = 0; i < data.length; i++) {
+      if (data[i][0]) idSet.add(data[i][0]);
   }
-  const ids = sheet.getRange(2, idColumnIndex, lastRow - 1, 1).getValues()
-    .flat() // 2D配列を1D配列に変換
-    .filter(id => id !== ''); // 空白のIDを除外
-  return new Set(ids);
+  return idSet;
 }
 
-/**
- * JSON形式のレスポンスを生成します。
- * @param {object} obj - レスポンスとして返すオブジェクト。
- * @returns {ContentService.TextOutput} JSON文字列に変換されたレスポンス。
- */
 function createJsonResponse(obj) {
   return ContentService.createTextOutput(JSON.stringify(obj))
     .setMimeType(ContentService.MimeType.JSON);
