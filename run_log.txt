@@ -4,3 +4,11 @@
 [2026-01-03 12:03:41] Launching Chrome...
 [2026-01-03 12:03:43] Process exited immediately (likely merged). Cannot identifying the specific window to minimize.
 [2026-01-03 12:03:43] Script finished.
+[2026-01-03 12:06:51] ----------------------------------------
+[2026-01-03 12:06:51] Script started (Simple Launcher).
+[2026-01-03 12:06:51] Target Chrome: C:\Program Files\Google\Chrome\Application\chrome.exe
+[2026-01-03 12:06:51] Start-Process called.
+[2026-01-03 12:07:05] ----------------------------------------
+[2026-01-03 12:07:05] Script started (Simple Launcher).
+[2026-01-03 12:07:05] Target Chrome: C:\Program Files\Google\Chrome\Application\chrome.exe
+[2026-01-03 12:07:05] Start-Process called.

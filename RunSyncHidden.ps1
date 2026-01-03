@@ -1,10 +1,11 @@
 <#
 .SYNOPSIS
-    Money Forward ME 自動同期起動スクリプト (シンプル版)
+    Money Forward ME 自動同期起動スクリプト (シンプル版 + 最小化付与)
 
 .DESCRIPTION
     Chromeを起動し、Money Forwardの自動同期を開始します。
-    ウィンドウの制御はタスクスケジューラ側の設定（「表示しない/Hidden」）に委ねることを推奨します。
+    タスクスケジューラの「表示しない」と組み合わせて使用しますが、
+    Chrome側へも念の為「最小化」を要求します。
 #>
 
 # --- 設定項目 ---
@@ -25,7 +26,7 @@ function Write-Log {
 }
 
 Write-Log "----------------------------------------"
-Write-Log "Script started (Simple Launcher)."
+Write-Log "Script started (Simple + Minimized)."
 
 $TargetChrome = $null
 if (Test-Path $ChromePath_x64) { $TargetChrome = $ChromePath_x64 }
@@ -44,10 +45,10 @@ try {
         $SyncUrl
     )
     
-    # 既存のChromeプロセスがある場合、新しいタブとして追加されることが多い
-    # タスクスケジューラの「表示しない」で起動されればウィンドウは出ないはず
-    Start-Process -FilePath $TargetChrome -ArgumentList $ArgsList
-    Write-Log "Start-Process called."
+    # Start-Process に -WindowStyle Minimized を追加
+    # タスクスケジューラがHiddenでも、子プロセス(Chrome)がGUIを持つ場合の保険になります
+    Start-Process -FilePath $TargetChrome -ArgumentList $ArgsList -WindowStyle Minimized
+    Write-Log "Start-Process called (Minimized)."
 }
 catch {
     Write-Log "Error: $_"
