@@ -1,8 +1,9 @@
+```javascript
 // ==UserScript==
 // @name         fire-trajectory-sync-client
 // @namespace    http://tampermonkey.net/
-// @version      3.41
-// @description  Money Forward MEのデータをGASへ自動同期します。(SPAボタン連打/論理カウンター版)
+// @version      3.50
+// @description  Money Forward MEのデータをGASへ自動同期します。(スマート自動実行/自動クローズ版)
 // @author       Naoki Yoshida
 // @match        https://moneyforward.com/cf*
 // @downloadURL  https://raw.githubusercontent.com/naokiyoshida/fire-trajectory/main/src/mf_sync_client.user.js
@@ -21,22 +22,22 @@
     const addStyles = () => {
         const style = document.createElement('style');
         style.textContent = `
-#mf-sync-status {
+#mf - sync - status {
     position: fixed;
     bottom: 20px;
     right: 20px;
     background: rgba(0, 0, 0, 0.8);
     color: white;
     padding: 10px 15px;
-    border-radius: 5px;
-    z-index: 9999;
-    font-family: sans-serif;
-    font-size: 14px;
+    border - radius: 5px;
+    z - index: 9999;
+    font - family: sans - serif;
+    font - size: 14px;
     transition: opacity 0.5s;
-    max-width: 300px;
+    max - width: 300px;
 }
-#mf-sync-status.hidden { opacity: 0; pointer-events: none; }
-#mf-sync-status.error { background: rgba(200, 0, 0, 0.9); }
+#mf - sync - status.hidden { opacity: 0; pointer - events: none; }
+#mf - sync - status.error { background: rgba(200, 0, 0, 0.9); }
 `;
         document.head.appendChild(style);
     };
@@ -63,7 +64,7 @@
                 headers: { "Content-Type": "text/plain;charset=utf-8" },
                 data: options.body,
                 anonymous: true,
-                onload: (res) => (res.status >= 200 && res.status < 300) ? resolve(res) : reject(new Error(`HTTP ${res.status}`)),
+                onload: (res) => (res.status >= 200 && res.status < 300) ? resolve(res) : reject(new Error(`HTTP ${ res.status } `)),
                 onerror: () => reject(new Error("Network Error"))
             });
         });
@@ -82,7 +83,7 @@
         const rows = element.querySelectorAll('tr');
         const data = [];
         rows.forEach(row => {
-            const getText = (cls) => row.querySelector(`.${cls}`)?.innerText.trim();
+            const getText = (cls) => row.querySelector(`.${ cls } `)?.innerText.trim();
             const cells = row.querySelectorAll('td');
 
             let dateRaw = getText('date') || cells[0]?.innerText.trim();
@@ -108,9 +109,9 @@
                     // 論理チェック: 画面上の月が、私たちが期待している月と一致する場合のみ採用
                     if (parseInt(m, 10) !== parseInt(month, 10)) return;
 
-                    const date = `${year}/${m}/${d}`;
+                    const date = `${ year } /${m}/${ d } `;
                     const amount = amountRaw.replace(/[,円\s]/g, '').replace(/\(振替\)/, '');
-                    const uniqueString = `${date}-${content}-${amount}-${source}-${category}`;
+                    const uniqueString = `${ date } -${ content } -${ amount } -${ source } -${ category } `;
                     const hashId = CryptoJS.SHA256(uniqueString).toString(CryptoJS.enc.Hex);
                     data.push({ ID: hashId, date, content, amount, source, category });
                 }
@@ -157,10 +158,10 @@
                 isFullMode = true;
                 monthsToSync = (logicalYear - 2021) * 12 + (logicalMonth - 10) + 1;
                 monthsToSync = Math.max(monthsToSync, 6);
-                console.log(`【Sync Mode】Full Sync initiated. Months to sync: ${monthsToSync}`);
+                console.log(`【Sync Mode】Full Sync initiated.Months to sync: ${ monthsToSync } `);
             } else {
                 monthsToSync = 6;
-                console.log(`【Sync Mode】Incremental Sync. Months to sync: ${monthsToSync}`);
+                console.log(`【Sync Mode】Incremental Sync.Months to sync: ${ monthsToSync } `);
             }
         } catch (e) {
             console.warn("GAS Config failed, defaulting to 6 months", e);
@@ -168,7 +169,7 @@
 
         if (!isAuto) {
             const modeText = isFullMode ? "全期間（2021/10〜）" : "直近6ヶ月分";
-            if (!confirm(`${logicalYear}年${logicalMonth}月から遡って ${modeText} のデータを同期しますか？\n(画面を閉じたり操作したりしないでください)`)) return;
+            if (!confirm(`${ logicalYear }年${ logicalMonth }月から遡って ${ modeText } のデータを同期しますか？\n(画面を閉じたり操作したりしないでください)`)) return;
         }
 
         let allCollectedData = [];
@@ -180,15 +181,15 @@
                 return;
             }
 
-            showStatus(`同期中: ${logicalYear}年${logicalMonth}月 (${i + 1}/${monthsToSync})`);
+            showStatus(`同期中: ${ logicalYear }年${ logicalMonth } 月(${ i + 1}/${monthsToSync})`);
 
-            // 画面が切り替わるのを待つ (最大10秒)
+            // 画面が切り替わるのを待つ (最大20秒)
             let retry = 0;
             let pageData = [];
-            while (retry < 20) {
+            while (retry < 40) {
                 if (isRequestStop) return;
                 const headerTitle = document.querySelector('.fc-header-title, .transaction-range-display')?.innerText || "";
-                const isCorrectMonthOnPage = headerTitle.includes(`${logicalMonth}月`);
+                const isCorrectMonthOnPage = headerTitle.includes(`${ logicalMonth } 月`);
 
                 pageData = scrapePage(logicalYear, logicalMonth);
                 const currentHash = JSON.stringify(pageData.slice(0, 3));
@@ -212,102 +213,115 @@
                 retry++;
             }
 
-            console.log(`【Scrape】${logicalYear}/${logicalMonth}: ${pageData.length} items found.`);
-            allCollectedData.push(...pageData);
+            console.log(`【Scrape】${ logicalYear }/${logicalMonth}: ${pageData.length} items found.`);
+allCollectedData.push(...pageData);
 
-            // 「前月」ボタンを押す
-            if (i < monthsToSync - 1) {
-                const prevBtn = document.querySelector('button.fc-button-prev, .fc-button-prev, #menu_range_prev, .previous_month a');
-                if (prevBtn) {
-                    prevBtn.click();
-                    // カウンター更新
-                    logicalMonth--;
-                    if (logicalMonth < 1) { logicalMonth = 12; logicalYear--; }
-                    // 読み込み待ち
-                    await new Promise(r => setTimeout(r, 800));
-                } else {
-                    console.error("前月ボタンが見つかりません。中断します。");
-                    break;
-                }
-            }
+// 「前月」ボタンを押す
+if (i < monthsToSync - 1) {
+    const prevBtn = document.querySelector('button.fc-button-prev, .fc-button-prev, #menu_range_prev, .previous_month a');
+    if (prevBtn) {
+        prevBtn.click();
+        // カウンター更新
+        logicalMonth--;
+        if (logicalMonth < 1) { logicalMonth = 12; logicalYear--; }
+        // 読み込み待ち
+        await new Promise(r => setTimeout(r, 800));
+    } else {
+        console.error("前月ボタンが見つかりません。中断します。");
+        break;
+    }
+}
         }
 
-        // 3. 送信
-        if (allCollectedData.length > 0) {
-            showStatus(`${allCollectedData.length}件を送信中...`);
-            // 重複排除は念のためクライアントでもやるが、基本はGAS側におまかせ
-            const uniqueData = allCollectedData.filter((v, i, a) => a.findIndex(t => t.ID === v.ID) === i);
-            try {
-                const res = await gmFetch(gasUrl, { method: "POST", body: JSON.stringify({ action: "sync_data", data: uniqueData }) });
-                const result = JSON.parse(res.responseText);
-                if (!isAuto) alert(`同期完了！\n${result.count}件の新規取引を保存しました。(重複排除済み)`);
-                showStatus(`完了: ${result.count}件`, 5000);
-                // 完了時間を記録
-                await GM_setValue('LAST_SYNC_TIME', Date.now());
-            } catch (e) {
-                if (!isAuto) alert("送信エラー: " + e.message);
-                showStatus("Error", 5000, true);
-            }
+// 3. 送信
+if (allCollectedData.length > 0) {
+    showStatus(`${allCollectedData.length}件を送信中...`);
+    // 重複排除は念のためクライアントでもやるが、基本はGAS側におまかせ
+    const uniqueData = allCollectedData.filter((v, i, a) => a.findIndex(t => t.ID === v.ID) === i);
+    try {
+        const res = await gmFetch(gasUrl, { method: "POST", body: JSON.stringify({ action: "sync_data", data: uniqueData }) });
+        const result = JSON.parse(res.responseText);
+        showStatus(`完了: ${result.count}件`, 5000);
+        // 完了時間を記録
+        await GM_setValue('LAST_SYNC_TIME', Date.now());
+
+        if (isAuto) {
+            // 自動実行時は、しばらく待ってからタブを閉じる
+            console.log("MF Sync: Auto-sync completed. Closing tab in 3 seconds...");
+            showStatus("同期完了。タブを閉じます...", 3000);
+            setTimeout(() => {
+                // ブラウザの仕様（スクリプトから開いたタブのみ閉じられる等）に依存しますが、
+                // スケジューラ等から起動された独立タブなら閉じられる可能性が高い。
+                window.close();
+            }, 3000);
         } else {
-            if (!isAuto) alert("同期対象のデータが見つかりませんでした。");
+            alert(`同期完了！\n${result.count}件の新規取引を保存しました。`);
         }
+    } catch (e) {
+        if (!isAuto) alert("送信エラー: " + e.message);
+        showStatus("Error", 5000, true);
+    }
+} else {
+    if (!isAuto) alert("同期対象のデータが見つかりませんでした。");
+}
     }
 
-    // --- メニュー ---
-    const promptAndSetGasUrl = async () => {
-        const currentUrl = await GM_getValue('GAS_URL', '');
-        const newUrl = prompt('GAS URLを入力:', currentUrl);
-        if (newUrl) { await GM_setValue('GAS_URL', newUrl); location.reload(); }
-    };
+// --- メニュー ---
+const promptAndSetGasUrl = async () => {
+    const currentUrl = await GM_getValue('GAS_URL', '');
+    const newUrl = prompt('GAS URLを入力:', currentUrl);
+    if (newUrl) { await GM_setValue('GAS_URL', newUrl); location.reload(); }
+};
 
-    GM_registerMenuCommand('手動同期を開始 (状況判断)', () => runSyncFlow(false));
-    GM_registerMenuCommand('強制フル同期 (2021/10〜)', () => runSyncFlow(true));
-    GM_registerMenuCommand('同期を停止', () => { isRequestStop = true; showStatus("停止リクエスト送信済み..."); });
-    GM_registerMenuCommand('GAS URLを再設定', promptAndSetGasUrl);
-    GM_registerMenuCommand('【Debug】次回の読込時に強制同期', async () => {
-        await GM_setValue('DEBUG_FORCE_NEXT_SYNC', true);
-        alert("設定しました。ページをリロードすると同期が開始されます。");
-    });
+GM_registerMenuCommand('手動同期を開始 (状況判断)', () => runSyncFlow(false));
+GM_registerMenuCommand('強制フル同期 (2021/10〜)', () => runSyncFlow(true));
+GM_registerMenuCommand('同期を停止', () => { isRequestStop = true; showStatus("停止リクエスト送信済み..."); });
+GM_registerMenuCommand('GAS URLを再設定', promptAndSetGasUrl);
+GM_registerMenuCommand('【Debug】次回の読込時に強制同期', async () => {
+    await GM_setValue('DEBUG_FORCE_NEXT_SYNC', true);
+    alert("設定しました。ページをリロードすると同期が開始されます。");
+});
 
-    addStyles();
-    console.log("MF Sync: v3.42 Logical SPA mode ready.");
+addStyles();
+console.log("MF Sync: v3.50 Logical SPA mode ready.");
 
-    // --- 自動実行チェックと初期化 ---
-    const autoSyncCheck = async () => {
-        const lastSync = await GM_getValue('LAST_SYNC_TIME', 0);
-        const forceNext = await GM_getValue('DEBUG_FORCE_NEXT_SYNC', false);
-        const now = Date.now();
-        const interval = 1 * 60 * 60 * 1000; // 1時間間隔に短縮 (テストしやすさ・利便性のため)
+// --- 自動実行チェックと初期化 ---
+const autoSyncCheck = async () => {
+    const lastSync = await GM_getValue('LAST_SYNC_TIME', 0);
+    const forceNext = await GM_getValue('DEBUG_FORCE_NEXT_SYNC', false);
+    const now = Date.now();
+    const interval = 24 * 60 * 60 * 1000; // 本番用24時間
 
-        console.log(`MF Sync: Auto-sync check. Last sync: ${new Date(lastSync).toLocaleString()}. Elapsed: ${((now - lastSync) / 3600000).toFixed(1)} hours.`);
+    console.log(`MF Sync: Auto-sync check. Last sync: ${new Date(lastSync).toLocaleString()}.`);
 
-        // 最終同期から1日以上経過、かつ、URLが cf (入出金) のページであることを確認
-        if (forceNext || (now - lastSync > interval)) {
-            console.log("MF Sync: Condition met. Waiting for table...");
-            if (forceNext) {
-                console.log("MF Sync: Debug Force Sync triggered.");
-                await GM_setValue('DEBUG_FORCE_NEXT_SYNC', false); // フラグをリセット
-            }
-            showStatus("オート同期をチェック中...", 3000);
-
-            // テーブルが出るまで待つ
-            let checkRetry = 0;
-            const checkReady = setInterval(() => {
-                const table = document.querySelector('#cf-detail-table, #transaction_list_body, .js-transaction_table');
-                if (table) {
-                    clearInterval(checkReady);
-                    console.log("MF Sync: Table found. Starting sync flow.");
-                    runSyncFlow(false, true);
-                }
-                if (++checkRetry > 40) { // 最大20秒待機に延長
-                    console.warn("MF Sync: Auto-sync timed out waiting for table.");
-                    clearInterval(checkReady);
-                }
-            }, 500);
-        } else {
-            console.log(`MF Sync: Auto-sync skipped. (Interval: ${interval / 3600000}h)`);
+    // 最終同期から1日以上経過、かつ、URLが cf (入出金) のページであることを確認
+    if (forceNext || (now - lastSync > interval)) {
+        console.log("MF Sync: Auto-sync condition met.");
+        if (forceNext) {
+            console.log("MF Sync: Debug Force Sync triggered.");
+            await GM_setValue('DEBUG_FORCE_NEXT_SYNC', false); // フラグをリセット
         }
-    };
+        showStatus("オート同期をチェック中...", 3000);
 
-    autoSyncCheck();
-})();
+        // テーブルが出るまで待つ
+        let checkRetry = 0;
+        const checkReady = setInterval(() => {
+            const table = document.querySelector('#cf-detail-table, #transaction_list_body, .js-transaction_table');
+            if (table) {
+                clearInterval(checkReady);
+                console.log("MF Sync: Table detected. Starting sync...");
+                runSyncFlow(false, true);
+            }
+            if (++checkRetry > 50) { // 200ms * 50 = 10秒待機
+                console.warn("MF Sync: Table not found. Skipping auto-sync.");
+                clearInterval(checkReady);
+            }
+        }, 200); // 200ms間隔で高速チェック
+    } else {
+        console.log(`MF Sync: Auto-sync skipped. (Interval: ${interval / 3600000}h)`);
+    }
+};
+
+autoSyncCheck();
+}) ();
+```
