@@ -185,6 +185,8 @@
     function waitForTableAndRun(forceFull, isAuto, targetYear, targetMonth) {
         showStatus("ページ準備中...", 0);
         let checkRetry = 0;
+        let hasClickedToday = false;
+
         const checkReady = setInterval(async () => {
             const table = document.querySelector('#cf-detail-table, #transaction_list_body, .js-transaction_table');
             const headerTitle = document.querySelector('.fc-header-title, .transaction-range-display')?.innerText || "";
@@ -208,6 +210,15 @@
                 clearInterval(checkReady);
                 runSyncFlow(forceFull, isAuto);
             } else if (table && headerTitle) {
+                // マッチしない場合、ユーザ提案の「今月ボタン」を試す (ある程度待ってから)
+                if (!isMatch && !hasClickedToday && checkRetry > 5) {
+                    const todayBtn = document.querySelector('button.fc-button-today, .fc-today-button');
+                    if (todayBtn && !todayBtn.disabled) {
+                        console.log("MF Sync: Date mismatch - clicking 'Today' button.");
+                        todayBtn.click();
+                        hasClickedToday = true;
+                    }
+                }
                 console.log(`MF Sync: Waiting for month match. Expected: ${targetYear}/${targetMonth}, Got: ${headerTitle}`);
             }
 
