@@ -190,16 +190,15 @@
             const headerTitle = document.querySelector('.fc-header-title, .transaction-range-display')?.innerText || "";
 
             // ヘッダーの日付チェック関数 (YYYY年MM月 または YYYY/MM/DD 形式に対応)
+            // 戻り値: マッチすればtrue, マッチしなければfalse (ただしnullの場合はfalse)
             const checkHeaderDate = (text, tYear, tMonth) => {
                 if (!text) return false;
-                // "2026年1月...", "2026/01/01..." 等から 年と月 を抽出
                 const match = text.match(/(\d{4})\s*[\/.年]\s*(\d{1,2})/);
                 if (match) {
                     const y = parseInt(match[1], 10);
                     const m = parseInt(match[2], 10);
                     return y === tYear && m === tMonth;
                 }
-                // フォールバック: 単純な文字列マッチ (一応残す)
                 return text.includes(`${tMonth}月`);
             };
 
@@ -217,8 +216,30 @@
                 clearInterval(checkReady);
 
                 if (headerTitle && !isMatch) {
-                    console.error(`MF Sync: Fatal - Page content (${headerTitle}) does not match URL target (${targetYear}/${targetMonth}). Forcing reload.`);
-                    if (isAuto || await GM_getValue('PENDING_SYNC_MODE', false)) {
+                    console.error(`MF Sync: Fatal - Page content (${headerTitle}) does not match URL target (${targetYear}/${targetMonth}).`);
+
+                    const pendingMode = await GM_getValue('PENDING_SYNC_MODE', '');
+
+                    // すでにリロードを試みた(PENDINGあり)のにまだ不一致の場合、これ以上リダイレクトしても無駄なので諦める
+                    // サーバー側がその日付の表示を拒否している（未来日付など）可能性が高い
+                    if (pendingMode) {
+                        console.warn("MF Sync: Redirect failed to enforce date. Falling back to actual page date.");
+                        await GM_setValue('PENDING_SYNC_MODE', ''); // ループ防止のためにフラグ消去
+
+                        // ヘッダーから実際の日付を読み取ってスタートする
+                        const match = headerTitle.match(/(\d{4})\s*[\/.年]\s*(\d{1,2})/);
+                        if (match) {
+                            const actualYear = parseInt(match[1], 10);
+                            const actualMonth = parseInt(match[2], 10);
+                            if (!isAuto) alert(`指定された ${targetYear}/${targetMonth} に移動できませんでした。\n現在表示されている ${actualYear}/${actualMonth} から同期を開始します。`);
+                            runSyncFlow(forceFull, isAuto, actualYear, actualMonth);
+                            return;
+                        }
+                    }
+
+                    // まだリロードしていない、あるいは初回トライの場合はリロードを試みる
+                    if (isAuto || pendingMode) {
+                        // キャッシュバスターをつけてリロード
                         const newUrl = `https://moneyforward.com/cf?year=${targetYear}&month=${targetMonth}&_t=${Date.now()}`;
                         location.replace(newUrl);
                     } else if (!isAuto) {
@@ -232,7 +253,7 @@
     }
 
     // --- メイン同期フロー ---
-    async function runSyncFlow(forceFull = false, isAuto = false) {
+    async function runSyncFlow(forceFull = false, isAuto = false, overrideYear = null, overrideMonth = null) {
         if (isAuto) console.log("MF Sync: Auto-sync starting...");
         isRequestStop = false;
 
@@ -244,10 +265,10 @@
         }
 
         const urlParams = new URLSearchParams(window.location.search);
-        let logicalYear = parseInt(urlParams.get('year'), 10);
-        let logicalMonth = parseInt(urlParams.get('month'), 10);
+        // オーバーライドがあればそれを優先、なければURLから、それもなければ現在日時
+        let logicalYear = overrideYear || parseInt(urlParams.get('year'), 10);
+        let logicalMonth = overrideMonth || parseInt(urlParams.get('month'), 10);
 
-        // URLパラメータが不正(または無い)場合は現在年月で補完
         if (isNaN(logicalYear) || isNaN(logicalMonth)) {
             const now = new Date();
             logicalYear = now.getFullYear();
@@ -284,6 +305,13 @@
                 return;
             }
 
+            // ページ遷移が必要な場合（2ヶ月目以降 or 初回でもoverride等でページが違う場合）
+            // ただし初回(i=0)でかつ現在ページが対象月と一致しているなら遷移不要
+            // ここではシンプルに「現在のDOMヘッダー」をチェックして、違えば遷移待ちをする、というアプローチ
+
+            // NOTE: runSyncFlowが呼ばれた時点で、i=0のページには居るはず(waitForTableAndRunで保証済)
+            // ただしフォールバックの場合はここに居る
+
             showStatus(`同期中: ${logicalYear}年${logicalMonth}月 (${i + 1}/${monthsToSync})`);
 
             let retry = 0;
@@ -291,7 +319,17 @@
             while (retry < CONFIG.RETRY_LIMIT) {
                 if (isRequestStop) return;
                 const headerTitle = document.querySelector('.fc-header-title, .transaction-range-display')?.innerText || "";
-                const isCorrectMonthOnPage = headerTitle.includes(`${logicalMonth}月`);
+
+                // ヘッダー日付判定
+                let isCorrectMonthOnPage = false;
+                const match = headerTitle.match(/(\d{4})\s*[\/.年]\s*(\d{1,2})/);
+                if (match) {
+                    const y = parseInt(match[1], 10);
+                    const m = parseInt(match[2], 10);
+                    isCorrectMonthOnPage = (y === logicalYear && m === logicalMonth);
+                } else {
+                    isCorrectMonthOnPage = headerTitle.includes(`${logicalMonth}月`);
+                }
 
                 pageData = scrapePage(logicalYear, logicalMonth);
                 const currentHash = JSON.stringify(pageData.slice(0, 3));
@@ -300,7 +338,11 @@
                     lastPageHash = currentHash;
                     break;
                 }
+
+                // データ0件でも、ヘッダーが正しい月なら「データなし」として確定して良い
+                // ただしローディング中は待つ
                 if (isCorrectMonthOnPage && !document.querySelector('.loading-spinner')) {
+                    // 念の為少し待って再取得
                     await new Promise(r => setTimeout(r, 500));
                     pageData = scrapePage(logicalYear, logicalMonth);
                     break;
