@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         fire-trajectory-sync-client
 // @namespace    http://tampermonkey.net/
-// @version      3.60
+// @version      3.61
 // @description  Money Forward MEのデータをGASへ自動同期します。(設定集約/スマート自動実行版)
 // @author       Naoki Yoshida
 // @match        https://moneyforward.com/cf*
@@ -292,6 +292,26 @@
 
         if (forceNext || (now - lastSync > CONFIG.SYNC_INTERVAL_MS)) {
             console.log("MF Sync: Auto-sync condition met.");
+
+            // 1. URLが「今月」を指しているか確認し、違えばリダイレクト
+            const today = new Date();
+            const currentYear = today.getFullYear();
+            const currentMonth = today.getMonth() + 1;
+
+            const urlParams = new URLSearchParams(window.location.search);
+            const paramYear = parseInt(urlParams.get('year'), 10);
+            const paramMonth = parseInt(urlParams.get('month'), 10);
+
+            // パラメータがない、または今月でない場合は、明示的に今月のURLへ移動してリロード
+            if (paramYear !== currentYear || paramMonth !== currentMonth) {
+                console.log(`MF Sync: Redirecting to current month (${currentYear}/${currentMonth})...`);
+                const targetUrl = `https://moneyforward.com/cf?year=${currentYear}&month=${currentMonth}`;
+                if (location.href !== targetUrl) {
+                    location.replace(targetUrl);
+                    return;
+                }
+            }
+
             if (forceNext) await GM_setValue('DEBUG_FORCE_NEXT_SYNC', false);
             showStatus("オート同期をチェック中...", 3000);
 
