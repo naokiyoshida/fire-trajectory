@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         fire-trajectory-sync-client
 // @namespace    http://tampermonkey.net/
-// @version      3.21
+// @version      3.22
 // @description  Money Forward MEのデータをGASへ自動同期します。(SPAボタン連打/論理カウンター版)
 // @author       Naoki Yoshida
 // @match        https://moneyforward.com/cf*
@@ -157,22 +157,28 @@
         for (let i = 0; i < monthsToSync; i++) {
             showStatus(`同期中: ${logicalYear}年${logicalMonth}月 (${i + 1}/${monthsToSync})`);
 
-            // 画面が切り替わるのを待つ (前回と中身が変わるまで、最大10秒)
+            // 画面が切り替わるのを待つ (最大10秒)
             let retry = 0;
             let pageData = [];
             while (retry < 20) {
-                pageData = scrapePage(logicalYear, logicalMonth);
-                const currentHash = JSON.stringify(pageData.slice(0, 3)); // 最初の3件を指紋にする
+                const headerTitle = document.querySelector('.fc-header-title, .transaction-range-display')?.innerText || "";
+                const isCorrectMonthOnPage = headerTitle.includes(`${logicalMonth}月`);
 
-                // データがあり、かつ前月と違うことが確認できればOK (0件の月はスキップ)
+                pageData = scrapePage(logicalYear, logicalMonth);
+                const currentHash = JSON.stringify(pageData.slice(0, 3));
+
+                // 1. データがあり、かつ前回と指紋が違うことが確認できればOK
                 if (pageData.length > 0 && currentHash !== lastPageHash) {
                     lastPageHash = currentHash;
                     break;
                 }
 
-                // データが0件の場合は、読み込み中スピナーがないか確認
-                if (pageData.length === 0 && !document.querySelector('.loading-spinner')) {
-                    // スピナーもなく0件なら、本当に0件の月として扱う
+                // 2. データが0件の場合でも、ヘッダーの表示が「期待する月」に切り替わっており、
+                // かつ読み込み中スピナーがなければ、本当に0件の月として確定
+                if (isCorrectMonthOnPage && !document.querySelector('.loading-spinner')) {
+                    // 念のため少し追加で待ってから確定
+                    await new Promise(r => setTimeout(r, 500));
+                    pageData = scrapePage(logicalYear, logicalMonth);
                     break;
                 }
 
@@ -180,7 +186,7 @@
                 retry++;
             }
 
-            console.log(`【Scrape】${logicalYear}/${logicalMonth}: ${pageData.length} items found.`);
+            console.log(`【Scrape】${logicalYear}/${logicalMonth}: ${pageData.length} items found. (Wait: ${retry * 500}ms)`);
             allCollectedData.push(...pageData);
 
             // 「前月」ボタンを押す
