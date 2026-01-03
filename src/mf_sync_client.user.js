@@ -427,6 +427,10 @@
 
     // --- 起動時チェック: 保留中の同期 or オート同期判定 ---
     (async () => {
+        // タスクスケジューラからの起動判定 (URLパラメータ ?force_auto_sync=true)
+        const urlParams = new URLSearchParams(window.location.search);
+        const isTaskScheduler = urlParams.get('force_auto_sync') === 'true';
+
         // 1. 保留中の同期があるか？ (リダイレクト復帰など)
         const pendingMode = await GM_getValue('PENDING_SYNC_MODE', '');
         if (pendingMode) {
@@ -440,9 +444,9 @@
         const forceNext = await GM_getValue('DEBUG_FORCE_NEXT_SYNC', false);
         const now = Date.now();
 
-        console.log(`MF Sync: Auto-sync check. Last sync: ${new Date(lastSync).toLocaleString()}.`);
+        console.log(`MF Sync: Auto-sync check. Last sync: ${new Date(lastSync).toLocaleString()}. TaskScheduler: ${isTaskScheduler}`);
 
-        if (forceNext || (now - lastSync > CONFIG.SYNC_INTERVAL_MS)) {
+        if (isTaskScheduler || forceNext || (now - lastSync > CONFIG.SYNC_INTERVAL_MS)) {
             console.log("MF Sync: Auto-sync condition met.");
             if (forceNext) await GM_setValue('DEBUG_FORCE_NEXT_SYNC', false);
 
