@@ -20,30 +20,40 @@
     // ==========================================
     //  ユーザー設定 / デバッグ設定
     // ==========================================
-    const CONFIG = {
-        // 自動実行の間隔 (ミリ秒)
-        // 24時間: 24 * 60 * 60 * 1000
-        // テスト時は 5 * 1000 (5秒) などに書き換えるとリロードで即実行されます
-        SYNC_INTERVAL_MS: 24 * 60 * 60 * 1000,
+    // ==========================================
+    //  ユーザー設定 / デバッグ設定
+    // ==========================================
 
-        // 通常同期 (Incremental) で遡る月数
+    // --- モード切替 ---
+    const ENABLE_DEBUG_CONFIG = false; // trueにするとデバッグ設定を使用
+
+    // 本番環境用設定
+    const CONFIG_PROD = {
+        SYNC_INTERVAL_MS: 24 * 60 * 60 * 1000, // 24時間
         INCREMENTAL_MONTHS: 6,
-
-        // フル同期 (Full) 時の開始年月
         START_YEAR: 2021,
         START_MONTH: 10,
-
-        // ページ読み込み待ちの設定
-        RETRY_LIMIT: 40,      // 最大試行回数
-        RETRY_INTERVAL_MS: 500, // 試行間隔
-
-        // 自動実行時のテーブル検知設定
-        AUTO_CHECK_LIMIT: 50,      // 最大試試行回数
-        AUTO_CHECK_INTERVAL_MS: 200, // 試行間隔 (高速検知)
-
-        // 自動実行完了後のタブ閉鎖待ち時間
+        RETRY_LIMIT: 40,
+        RETRY_INTERVAL_MS: 500,
+        AUTO_CHECK_LIMIT: 50,
+        AUTO_CHECK_INTERVAL_MS: 200,
         AUTO_CLOSE_WAIT_MS: 3000
     };
+
+    // デバッグ用設定 (高速動作・テスト用)
+    const CONFIG_DEBUG = {
+        SYNC_INTERVAL_MS: 5000, // 5秒 (リロード連打テスト用)
+        INCREMENTAL_MONTHS: 2,  // 期間短縮
+        START_YEAR: 2024,
+        START_MONTH: 1,
+        RETRY_LIMIT: 20,
+        RETRY_INTERVAL_MS: 200, // 高速リトライ
+        AUTO_CHECK_LIMIT: 20,
+        AUTO_CHECK_INTERVAL_MS: 100,
+        AUTO_CLOSE_WAIT_MS: 1000
+    };
+
+    const CONFIG = ENABLE_DEBUG_CONFIG ? CONFIG_DEBUG : CONFIG_PROD;
 
     // --- 設定・ステート ---
     const addStyles = () => {
