@@ -12,3 +12,11 @@
 [2026-01-03 12:07:05] Script started (Simple Launcher).
 [2026-01-03 12:07:05] Target Chrome: C:\Program Files\Google\Chrome\Application\chrome.exe
 [2026-01-03 12:07:05] Start-Process called.
+[2026-01-03 12:10:12] ----------------------------------------
+[2026-01-03 12:10:12] Script started (Simple + Minimized).
+[2026-01-03 12:10:12] Target Chrome: C:\Program Files\Google\Chrome\Application\chrome.exe
+[2026-01-03 12:10:12] Start-Process called (Minimized).
+[2026-01-03 12:11:26] ----------------------------------------
+[2026-01-03 12:11:26] Script started (Simple + Minimized).
+[2026-01-03 12:11:26] Target Chrome: C:\Program Files\Google\Chrome\Application\chrome.exe
+[2026-01-03 12:11:27] Start-Process called (Minimized).
