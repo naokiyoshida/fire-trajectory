@@ -178,28 +178,45 @@
         const isAuto = (mode === 'AUTO');
         const forceFull = (mode === 'FORCE_FULL');
 
-        // テーブルの存在チェック (SPA遷移直後などのため)
-        if (isAuto) {
-            waitForTableAndRun(forceFull, isAuto);
-        } else {
-            // 手動の場合は即実行 (もしロード待ちが必要なら wait 入れるが、通常はロード済み)
-            runSyncFlow(forceFull, isAuto);
-        }
+        // テーブルの存在チェック & 年月同一性の確認
+        waitForTableAndRun(forceFull, isAuto, currentYear, currentMonth);
     }
 
-    function waitForTableAndRun(forceFull, isAuto) {
+    function waitForTableAndRun(forceFull, isAuto, targetYear, targetMonth) {
         showStatus("ページ準備中...", 0);
         let checkRetry = 0;
-        const checkReady = setInterval(() => {
+        const checkReady = setInterval(async () => {
             const table = document.querySelector('#cf-detail-table, #transaction_list_body, .js-transaction_table');
-            if (table) {
+            const headerTitle = document.querySelector('.fc-header-title, .transaction-range-display')?.innerText || "";
+
+            // テーブルがあり、かつヘッダーの月がターゲットと一致するか？
+            // タイトル例: "2026年1月1日 - 2026年1月31日" や "2026年01月"
+            if (table && headerTitle.includes(`${targetMonth}月`)) {
                 clearInterval(checkReady);
                 runSyncFlow(forceFull, isAuto);
+            } else if (table && headerTitle) {
+                // テーブルはあるが月が違う場合...もう少し待つ
+                console.log(`MF Sync: Waiting for month match. Expected: ${targetMonth}, Got: ${headerTitle}`);
             }
+
             if (++checkRetry > CONFIG.AUTO_CHECK_LIMIT) {
-                console.warn("MF Sync: Table not found. Aborting.");
+                console.warn("MF Sync: Time out or Month mismatch.");
                 clearInterval(checkReady);
-                if (!isAuto) alert("取引テーブルが見つかりませんでした。");
+
+                // もし月が違ってタイムアウトした場合、本当にページ遷移がうまくいっていない可能性がある
+                if (headerTitle && !headerTitle.includes(`${targetMonth}月`)) {
+                    console.error(`MF Sync: Fatal - Page content (${headerTitle}) does not match URL target (${targetMonth}). Forcing reload.`);
+                    if (isAuto || await GM_getValue('PENDING_SYNC_MODE', false)) {
+                        // 再度リトライするためにフラグを戻してリロード（無限ループ防止のため回数制限が必要だが、まずは強力に直す）
+                        // 念の為キャッシュバスターをつける
+                        const newUrl = `https://moneyforward.com/cf?year=${targetYear}&month=${targetMonth}&_t=${Date.now()}`;
+                        location.replace(newUrl);
+                    } else if (!isAuto) {
+                        alert(`ページ内容が${targetMonth}月になりませんでした。\n手動で${targetMonth}月に移動してから再実行してください。`);
+                    }
+                } else {
+                    if (!isAuto) alert("取引テーブルが見つかりませんでした。");
+                }
             }
         }, CONFIG.AUTO_CHECK_INTERVAL_MS);
     }
