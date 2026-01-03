@@ -119,11 +119,20 @@
         return data;
     };
 
+    // --- 同期制御ステート ---
+    let isRequestStop = false;
+
     // --- メイン同期ループ (SPA) ---
-    async function runSyncFlow(forceFull = false) {
+    async function runSyncFlow(forceFull = false, isAuto = false) {
+        if (isAuto) console.log("MF Sync: Auto-sync triggered.");
+        isRequestStop = false;
+
         showStatus("同期準備中...");
         const gasUrl = await GM_getValue('GAS_URL');
-        if (!gasUrl) { alert("GAS URLを設定してください"); return; }
+        if (!gasUrl) {
+            if (!isAuto) alert("GAS URLを設定してください");
+            return;
+        }
 
         // 1. スタート地点の確定
         const urlParams = new URLSearchParams(window.location.search);
@@ -134,9 +143,6 @@
             const now = new Date();
             logicalYear = now.getFullYear(); // ユーザーPCの 2026
             logicalMonth = now.getMonth() + 1;
-            console.log(`【Start】No URL params. Starting from system date: ${logicalYear}/${logicalMonth}`);
-        } else {
-            console.log(`【Start】Starting from URL params: ${logicalYear}/${logicalMonth}`);
         }
 
         // 2. 期間の確定
@@ -153,18 +159,26 @@
             }
         } catch (e) { console.warn("GAS Config failed", e); }
 
-        if (!confirm(`${logicalYear}年${logicalMonth}月から遡って ${monthsToSync}ヶ月分 のデータを同期しますか？\n(画面を閉じたり操作したりしないでください)`)) return;
+        if (!isAuto) {
+            if (!confirm(`${logicalYear}年${logicalMonth}月から遡って ${monthsToSync}ヶ月分 のデータを同期しますか？\n(画面を閉じたり操作したりしないでください)`)) return;
+        }
 
         let allCollectedData = [];
         let lastPageHash = "";
 
         for (let i = 0; i < monthsToSync; i++) {
+            if (isRequestStop) {
+                showStatus("同期を中断しました", 3000, true);
+                return;
+            }
+
             showStatus(`同期中: ${logicalYear}年${logicalMonth}月 (${i + 1}/${monthsToSync})`);
 
             // 画面が切り替わるのを待つ (最大10秒)
             let retry = 0;
             let pageData = [];
             while (retry < 20) {
+                if (isRequestStop) return;
                 const headerTitle = document.querySelector('.fc-header-title, .transaction-range-display')?.innerText || "";
                 const isCorrectMonthOnPage = headerTitle.includes(`${logicalMonth}月`);
 
@@ -217,14 +231,16 @@
             try {
                 const res = await gmFetch(gasUrl, { method: "POST", body: JSON.stringify({ action: "sync_data", data: uniqueData }) });
                 const result = JSON.parse(res.responseText);
-                alert(`同期完了！\n${result.count}件の取引を保存しました。`);
+                if (!isAuto) alert(`同期完了！\n${result.count}件の取引を保存しました。`);
                 showStatus(`完了: ${result.count}件`, 5000);
+                // 完了時間を記録
+                await GM_setValue('LAST_SYNC_TIME', Date.now());
             } catch (e) {
-                alert("送信エラー: " + e.message);
+                if (!isAuto) alert("送信エラー: " + e.message);
                 showStatus("Error", 5000, true);
             }
         } else {
-            alert("同期対象のデータが見つかりませんでした。");
+            if (!isAuto) alert("同期対象のデータが見つかりませんでした。");
         }
     }
 
@@ -237,8 +253,23 @@
 
     GM_registerMenuCommand('通常同期を開始', () => runSyncFlow(false));
     GM_registerMenuCommand('強制フル同期 (2021/10〜)', () => runSyncFlow(true));
+    GM_registerMenuCommand('同期を停止', () => { isRequestStop = true; showStatus("停止リクエスト送信済み..."); });
     GM_registerMenuCommand('GAS URLを再設定', promptAndSetGasUrl);
 
     addStyles();
     console.log("MF Sync: Logical SPA mode ready.");
+
+    // --- 自動実行チェック ---
+    const autoSyncCheck = async () => {
+        const lastSync = await GM_getValue('LAST_SYNC_TIME', 0);
+        const now = Date.now();
+        const oneDay = 24 * 60 * 60 * 1000;
+
+        if (now - lastSync > oneDay) {
+            runSyncFlow(false, true);
+        }
+    };
+
+    // ページ読み込み完了後にチェック（少し待機して安定させてから）
+    setTimeout(autoSyncCheck, 3000);
 })();
