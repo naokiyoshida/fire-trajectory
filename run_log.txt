@@ -1,0 +1,6 @@
+[2026-01-03 12:03:41] ----------------------------------------
+[2026-01-03 12:03:41] Script started (User32 Minimize Version).
+[2026-01-03 12:03:41] Target Chrome: C:\Program Files\Google\Chrome\Application\chrome.exe
+[2026-01-03 12:03:41] Launching Chrome...
+[2026-01-03 12:03:43] Process exited immediately (likely merged). Cannot identifying the specific window to minimize.
+[2026-01-03 12:03:43] Script finished.
