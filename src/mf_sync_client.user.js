@@ -146,6 +146,65 @@
 
     let isRequestStop = false;
 
+    // --- 統一された開始シーケンス (初期化・リダイレクト含む) ---
+    async function startSyncSequence(mode) {
+        // mode: 'MANUAL' | 'FORCE_FULL' | 'AUTO'
+        console.log(`MF Sync: Requesting start sequence (Mode: ${mode})`);
+
+        // 1. カレントページの確認 (必ず「今月」からスタートする)
+        const today = new Date();
+        const currentYear = today.getFullYear();
+        const currentMonth = today.getMonth() + 1;
+        const targetUrl = `https://moneyforward.com/cf?year=${currentYear}&month=${currentMonth}`;
+
+        const urlParams = new URLSearchParams(window.location.search);
+        const paramYear = parseInt(urlParams.get('year'), 10);
+        const paramMonth = parseInt(urlParams.get('month'), 10);
+
+        const isCurrentMonth = (paramYear === currentYear && paramMonth === currentMonth);
+
+        // ページが違う場合はリダイレクトを行い、次回のロードで実行する
+        if (!isCurrentMonth) {
+            console.log(`MF Sync: Redirecting to start page (${currentYear}/${currentMonth})...`);
+            await GM_setValue('PENDING_SYNC_MODE', mode);
+            location.assign(targetUrl); // historyに残して移動
+            return;
+        }
+
+        // 2. ページが正しい場合は同期フローを実行
+        // PENDINGフラグが生きていたら消しておく
+        await GM_setValue('PENDING_SYNC_MODE', '');
+
+        const isAuto = (mode === 'AUTO');
+        const forceFull = (mode === 'FORCE_FULL');
+
+        // テーブルの存在チェック (SPA遷移直後などのため)
+        if (isAuto) {
+            waitForTableAndRun(forceFull, isAuto);
+        } else {
+            // 手動の場合は即実行 (もしロード待ちが必要なら wait 入れるが、通常はロード済み)
+            runSyncFlow(forceFull, isAuto);
+        }
+    }
+
+    function waitForTableAndRun(forceFull, isAuto) {
+        showStatus("ページ準備中...", 0);
+        let checkRetry = 0;
+        const checkReady = setInterval(() => {
+            const table = document.querySelector('#cf-detail-table, #transaction_list_body, .js-transaction_table');
+            if (table) {
+                clearInterval(checkReady);
+                runSyncFlow(forceFull, isAuto);
+            }
+            if (++checkRetry > CONFIG.AUTO_CHECK_LIMIT) {
+                console.warn("MF Sync: Table not found. Aborting.");
+                clearInterval(checkReady);
+                if (!isAuto) alert("取引テーブルが見つかりませんでした。");
+            }
+        }, CONFIG.AUTO_CHECK_INTERVAL_MS);
+    }
+
+    // --- メイン同期フロー ---
     async function runSyncFlow(forceFull = false, isAuto = false) {
         if (isAuto) console.log("MF Sync: Auto-sync starting...");
         isRequestStop = false;
@@ -161,6 +220,7 @@
         let logicalYear = parseInt(urlParams.get('year'), 10);
         let logicalMonth = parseInt(urlParams.get('month'), 10);
 
+        // URLパラメータが不正(または無い)場合は現在年月で補完
         if (isNaN(logicalYear) || isNaN(logicalMonth)) {
             const now = new Date();
             logicalYear = now.getFullYear();
@@ -271,8 +331,10 @@
         if (newUrl) { await GM_setValue('GAS_URL', newUrl); location.reload(); }
     };
 
-    GM_registerMenuCommand('手動同期を開始 (状況判断)', () => runSyncFlow(false));
-    GM_registerMenuCommand('強制フル同期 (2021/10〜)', () => runSyncFlow(true));
+    // --- メニューコマンド登録 ---
+    // startSyncSequence を経由させることで、必ず今月のページに移動してから開始する
+    GM_registerMenuCommand('手動同期を開始 (今月から)', () => startSyncSequence('MANUAL'));
+    GM_registerMenuCommand('強制フル同期 (2021/10〜)', () => startSyncSequence('FORCE_FULL'));
     GM_registerMenuCommand('同期を停止', () => { isRequestStop = true; showStatus("停止リクエスト送信済み..."); });
     GM_registerMenuCommand('GAS URLを再設定', promptAndSetGasUrl);
     GM_registerMenuCommand('【Debug】次回の読込時に強制同期', async () => {
@@ -283,7 +345,17 @@
     addStyles();
     console.log(`MF Sync: v${GM_info.script.version} ready.`);
 
-    const autoSyncCheck = async () => {
+    // --- 起動時チェック: 保留中の同期 or オート同期判定 ---
+    (async () => {
+        // 1. 保留中の同期があるか？ (リダイレクト復帰など)
+        const pendingMode = await GM_getValue('PENDING_SYNC_MODE', '');
+        if (pendingMode) {
+            console.log(`MF Sync: Resuming pending sync mode: ${pendingMode}`);
+            await startSyncSequence(pendingMode);
+            return;
+        }
+
+        // 2. オート同期の判定
         const lastSync = await GM_getValue('LAST_SYNC_TIME', 0);
         const forceNext = await GM_getValue('DEBUG_FORCE_NEXT_SYNC', false);
         const now = Date.now();
@@ -292,47 +364,13 @@
 
         if (forceNext || (now - lastSync > CONFIG.SYNC_INTERVAL_MS)) {
             console.log("MF Sync: Auto-sync condition met.");
-
-            // 1. URLが「今月」を指しているか確認し、違えばリダイレクト
-            const today = new Date();
-            const currentYear = today.getFullYear();
-            const currentMonth = today.getMonth() + 1;
-
-            const urlParams = new URLSearchParams(window.location.search);
-            const paramYear = parseInt(urlParams.get('year'), 10);
-            const paramMonth = parseInt(urlParams.get('month'), 10);
-
-            // パラメータがない、または今月でない場合は、明示的に今月のURLへ移動してリロード
-            if (paramYear !== currentYear || paramMonth !== currentMonth) {
-                console.log(`MF Sync: Redirecting to current month (${currentYear}/${currentMonth})...`);
-                const targetUrl = `https://moneyforward.com/cf?year=${currentYear}&month=${currentMonth}`;
-                if (location.href !== targetUrl) {
-                    location.replace(targetUrl);
-                    return;
-                }
-            }
-
             if (forceNext) await GM_setValue('DEBUG_FORCE_NEXT_SYNC', false);
-            showStatus("オート同期をチェック中...", 3000);
 
-            let checkRetry = 0;
-            const checkReady = setInterval(() => {
-                const table = document.querySelector('#cf-detail-table, #transaction_list_body, .js-transaction_table');
-                if (table) {
-                    clearInterval(checkReady);
-                    console.log("MF Sync: Table detected. Starting sync...");
-                    runSyncFlow(false, true);
-                }
-                if (++checkRetry > CONFIG.AUTO_CHECK_LIMIT) {
-                    console.warn("MF Sync: Table not found. Skipping auto-sync.");
-                    clearInterval(checkReady);
-                }
-            }, CONFIG.AUTO_CHECK_INTERVAL_MS);
+            // startSyncSequence('AUTO') を呼ぶことで、必要ならリダイレクトされる
+            await startSyncSequence('AUTO');
         } else {
             const nextSync = new Date(lastSync + CONFIG.SYNC_INTERVAL_MS);
             console.log(`MF Sync: Auto-sync skipped. Next sync after: ${nextSync.toLocaleString()}`);
         }
-    };
-
-    autoSyncCheck();
+    })();
 })();
