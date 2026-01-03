@@ -4,18 +4,7 @@
 
 .DESCRIPTION
     Chromeを起動し、Money Forwardの自動同期を開始します。
-    
-    【重要: ウィンドウが表示されてしまう場合】
-    Google Chromeは「同じプロファイルを同時に複数のプロセスで開く」ことができません。
-    普段使いのChrome（Profile 1など）が開いている状態でこのスクリプトを実行すると、
-    既存のウィンドウに「新しいタブ」として追加されるため、必ず画面が出てしまいます。
-    
-    【完全非表示(Headless)にする方法】
-    1. 同期専用の新しいプロファイル（例: "Profile 99"）を作成し、MFへのログインとTampermonkeyの設定を行ってください。
-    2. 下記設定の $ProfileDir をそのプロファイル名に変更してください。
-    3. 下記設定の $HeadlessMode を $true に変更してください。
-    
-    これで、普段のChromeを使っていても、裏側で別プロファイルが完全に隠れて同期してくれます。
+    実行結果は 'run_log.txt' に出力されます（前回分のログは上書きされます）。
 #>
 
 # --- 設定項目 ---
@@ -27,11 +16,14 @@ $SyncUrl = "https://moneyforward.com/cf?force_auto_sync=true"
 $ProfileDir = "Profile 1"
 
 # 完全非表示モード (Headless)
-# $true にする場合は、普段使っていない（開いていない）プロファイルを指定する必要があります
 $HeadlessMode = $false
 
 # ログファイルパス
 $LogFile = Join-Path $PSScriptRoot "run_log.txt"
+
+# ログ初期化 (前回のログを削除してリセット)
+# これによりファイルサイズが無限に増えるのを防ぎます
+if (Test-Path $LogFile) { Remove-Item $LogFile -Force }
 
 function Write-Log {
     param($Message)
@@ -54,6 +46,7 @@ if (-not $TargetChrome) {
 }
 
 Write-Log "Target Chrome: $TargetChrome"
+# Profile情報は重要なデバッグ情報なので残します
 Write-Log "Profile: $ProfileDir"
 Write-Log "Headless: $HeadlessMode"
 
@@ -64,12 +57,11 @@ try {
     )
     
     if ($HeadlessMode) {
-        # Headlessモード (New)
-        # 拡張機能を有効にするために =new が必要
         $ArgsList += "--headless=new"
         $ArgsList += "--disable-gpu"
     }
     
+    # -WindowStyle Minimized: タスクスケジューラ以外から実行した際の保険
     Start-Process -FilePath $TargetChrome -ArgumentList $ArgsList -WindowStyle Minimized
     Write-Log "Start-Process called."
 }

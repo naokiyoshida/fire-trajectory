@@ -13,4 +13,4 @@ src/fire-config.js
 .DS_Store
 Thumbs.db
 .vscode/
-.idea/
+.idea/run_log.txt
