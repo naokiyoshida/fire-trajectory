@@ -110,122 +110,122 @@
                     const hashId = CryptoJS.SHA256(uniqueString).toString(CryptoJS.enc.Hex);
                     data.push({ ID: hashId, date, content, amount, source, category });
                 }
-            });
-    }
-    return data;
-};
-
-// --- メイン同期ループ (SPA) ---
-async function runSyncFlow(forceFull = false) {
-    showStatus("同期準備中...");
-    const gasUrl = await GM_getValue('GAS_URL');
-    if (!gasUrl) { alert("GAS URLを設定してください"); return; }
-
-    // 1. スタート地点の確定
-    const urlParams = new URLSearchParams(window.location.search);
-    let logicalYear = parseInt(urlParams.get('year'), 10);
-    let logicalMonth = parseInt(urlParams.get('month'), 10);
-
-    if (isNaN(logicalYear) || isNaN(logicalMonth)) {
-        const now = new Date();
-        logicalYear = now.getFullYear(); // ユーザーPCの 2026
-        logicalMonth = now.getMonth() + 1;
-        console.log(`【Start】No URL params. Starting from system date: ${logicalYear}/${logicalMonth}`);
-    } else {
-        console.log(`【Start】Starting from URL params: ${logicalYear}/${logicalMonth}`);
-    }
-
-    // 2. 期間の確定
-    let monthsToSync = 6;
-    try {
-        const res = await gmFetch(gasUrl, { method: "POST", body: JSON.stringify({ action: "get_sync_config" }) });
-        const config = JSON.parse(res.responseText);
-        if (forceFull || config.mode === 'Full') {
-            monthsToSync = (logicalYear - 2021) * 12 + (logicalMonth - 10) + 1;
-            monthsToSync = Math.max(monthsToSync, 6);
-        }
-    } catch (e) { console.warn("GAS Config failed", e); }
-
-    if (!confirm(`${logicalYear}年${logicalMonth}月から遡って ${monthsToSync}ヶ月分 のデータを同期しますか？\n(画面を閉じたり操作したりしないでください)`)) return;
-
-    let allCollectedData = [];
-    let lastPageHash = "";
-
-    for (let i = 0; i < monthsToSync; i++) {
-        showStatus(`同期中: ${logicalYear}年${logicalMonth}月 (${i + 1}/${monthsToSync})`);
-
-        // 画面が切り替わるのを待つ (前回と中身が変わるまで、最大10秒)
-        let retry = 0;
-        let pageData = [];
-        while (retry < 20) {
-            pageData = scrapePage(logicalYear, logicalMonth);
-            const currentHash = JSON.stringify(pageData.slice(0, 3)); // 最初の3件を指紋にする
-
-            // データがあり、かつ前月と違うことが確認できればOK (0件の月はスキップ)
-            if (pageData.length > 0 && currentHash !== lastPageHash) {
-                lastPageHash = currentHash;
-                break;
             }
+        });
+        return data;
+    };
 
-            // データが0件の場合は、読み込み中スピナーがないか確認
-            if (pageData.length === 0 && !document.querySelector('.loading-spinner')) {
-                // スピナーもなく0件なら、本当に0件の月として扱う
-                break;
-            }
+    // --- メイン同期ループ (SPA) ---
+    async function runSyncFlow(forceFull = false) {
+        showStatus("同期準備中...");
+        const gasUrl = await GM_getValue('GAS_URL');
+        if (!gasUrl) { alert("GAS URLを設定してください"); return; }
 
-            await new Promise(r => setTimeout(r, 500));
-            retry++;
+        // 1. スタート地点の確定
+        const urlParams = new URLSearchParams(window.location.search);
+        let logicalYear = parseInt(urlParams.get('year'), 10);
+        let logicalMonth = parseInt(urlParams.get('month'), 10);
+
+        if (isNaN(logicalYear) || isNaN(logicalMonth)) {
+            const now = new Date();
+            logicalYear = now.getFullYear(); // ユーザーPCの 2026
+            logicalMonth = now.getMonth() + 1;
+            console.log(`【Start】No URL params. Starting from system date: ${logicalYear}/${logicalMonth}`);
+        } else {
+            console.log(`【Start】Starting from URL params: ${logicalYear}/${logicalMonth}`);
         }
 
-        console.log(`【Scrape】${logicalYear}/${logicalMonth}: ${pageData.length} items found.`);
-        allCollectedData.push(...pageData);
-
-        // 「前月」ボタンを押す
-        if (i < monthsToSync - 1) {
-            const prevBtn = document.querySelector('button.fc-button-prev, .fc-button-prev, #menu_range_prev, .previous_month a');
-            if (prevBtn) {
-                prevBtn.click();
-                // カウンター更新
-                logicalMonth--;
-                if (logicalMonth < 1) { logicalMonth = 12; logicalYear--; }
-                // 読み込み待ち
-                await new Promise(r => setTimeout(r, 800));
-            } else {
-                console.error("前月ボタンが見つかりません。中断します。");
-                break;
-            }
-        }
-    }
-
-    // 3. 送信
-    if (allCollectedData.length > 0) {
-        showStatus(`${allCollectedData.length}件を送信中...`);
-        const uniqueData = allCollectedData.filter((v, i, a) => a.findIndex(t => t.ID === v.ID) === i);
+        // 2. 期間の確定
+        let monthsToSync = 6;
         try {
-            const res = await gmFetch(gasUrl, { method: "POST", body: JSON.stringify({ action: "sync_data", data: uniqueData }) });
-            const result = JSON.parse(res.responseText);
-            alert(`同期完了！\n${result.count}件の取引を保存しました。`);
-            showStatus(`完了: ${result.count}件`, 5000);
-        } catch (e) {
-            alert("送信エラー: " + e.message);
-            showStatus("Error", 5000, true);
+            const res = await gmFetch(gasUrl, { method: "POST", body: JSON.stringify({ action: "get_sync_config" }) });
+            const config = JSON.parse(res.responseText);
+            if (forceFull || config.mode === 'Full') {
+                monthsToSync = (logicalYear - 2021) * 12 + (logicalMonth - 10) + 1;
+                monthsToSync = Math.max(monthsToSync, 6);
+            }
+        } catch (e) { console.warn("GAS Config failed", e); }
+
+        if (!confirm(`${logicalYear}年${logicalMonth}月から遡って ${monthsToSync}ヶ月分 のデータを同期しますか？\n(画面を閉じたり操作したりしないでください)`)) return;
+
+        let allCollectedData = [];
+        let lastPageHash = "";
+
+        for (let i = 0; i < monthsToSync; i++) {
+            showStatus(`同期中: ${logicalYear}年${logicalMonth}月 (${i + 1}/${monthsToSync})`);
+
+            // 画面が切り替わるのを待つ (前回と中身が変わるまで、最大10秒)
+            let retry = 0;
+            let pageData = [];
+            while (retry < 20) {
+                pageData = scrapePage(logicalYear, logicalMonth);
+                const currentHash = JSON.stringify(pageData.slice(0, 3)); // 最初の3件を指紋にする
+
+                // データがあり、かつ前月と違うことが確認できればOK (0件の月はスキップ)
+                if (pageData.length > 0 && currentHash !== lastPageHash) {
+                    lastPageHash = currentHash;
+                    break;
+                }
+
+                // データが0件の場合は、読み込み中スピナーがないか確認
+                if (pageData.length === 0 && !document.querySelector('.loading-spinner')) {
+                    // スピナーもなく0件なら、本当に0件の月として扱う
+                    break;
+                }
+
+                await new Promise(r => setTimeout(r, 500));
+                retry++;
+            }
+
+            console.log(`【Scrape】${logicalYear}/${logicalMonth}: ${pageData.length} items found.`);
+            allCollectedData.push(...pageData);
+
+            // 「前月」ボタンを押す
+            if (i < monthsToSync - 1) {
+                const prevBtn = document.querySelector('button.fc-button-prev, .fc-button-prev, #menu_range_prev, .previous_month a');
+                if (prevBtn) {
+                    prevBtn.click();
+                    // カウンター更新
+                    logicalMonth--;
+                    if (logicalMonth < 1) { logicalMonth = 12; logicalYear--; }
+                    // 読み込み待ち
+                    await new Promise(r => setTimeout(r, 800));
+                } else {
+                    console.error("前月ボタンが見つかりません。中断します。");
+                    break;
+                }
+            }
         }
-    } else {
-        alert("同期対象のデータが見つかりませんでした。");
+
+        // 3. 送信
+        if (allCollectedData.length > 0) {
+            showStatus(`${allCollectedData.length}件を送信中...`);
+            const uniqueData = allCollectedData.filter((v, i, a) => a.findIndex(t => t.ID === v.ID) === i);
+            try {
+                const res = await gmFetch(gasUrl, { method: "POST", body: JSON.stringify({ action: "sync_data", data: uniqueData }) });
+                const result = JSON.parse(res.responseText);
+                alert(`同期完了！\n${result.count}件の取引を保存しました。`);
+                showStatus(`完了: ${result.count}件`, 5000);
+            } catch (e) {
+                alert("送信エラー: " + e.message);
+                showStatus("Error", 5000, true);
+            }
+        } else {
+            alert("同期対象のデータが見つかりませんでした。");
+        }
     }
-}
 
-// --- メニュー ---
-const promptAndSetGasUrl = async () => {
-    const currentUrl = await GM_getValue('GAS_URL', '');
-    const newUrl = prompt('GAS URLを入力:', currentUrl);
-    if (newUrl) { await GM_setValue('GAS_URL', newUrl); location.reload(); }
-};
+    // --- メニュー ---
+    const promptAndSetGasUrl = async () => {
+        const currentUrl = await GM_getValue('GAS_URL', '');
+        const newUrl = prompt('GAS URLを入力:', currentUrl);
+        if (newUrl) { await GM_setValue('GAS_URL', newUrl); location.reload(); }
+    };
 
-GM_registerMenuCommand('通常同期を開始', () => runSyncFlow(false));
-GM_registerMenuCommand('強制フル同期 (2021/10〜)', () => runSyncFlow(true));
-GM_registerMenuCommand('GAS URLを再設定', promptAndSetGasUrl);
+    GM_registerMenuCommand('通常同期を開始', () => runSyncFlow(false));
+    GM_registerMenuCommand('強制フル同期 (2021/10〜)', () => runSyncFlow(true));
+    GM_registerMenuCommand('GAS URLを再設定', promptAndSetGasUrl);
 
-addStyles();
-console.log("MF Sync: Logical SPA mode ready.");
-}) ();
+    addStyles();
+    console.log("MF Sync: Logical SPA mode ready.");
+})();
