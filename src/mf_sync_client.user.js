@@ -264,21 +264,30 @@
     GM_registerMenuCommand('強制フル同期 (2021/10〜)', () => runSyncFlow(true));
     GM_registerMenuCommand('同期を停止', () => { isRequestStop = true; showStatus("停止リクエスト送信済み..."); });
     GM_registerMenuCommand('GAS URLを再設定', promptAndSetGasUrl);
+    GM_registerMenuCommand('【Debug】次回の読込時に強制同期', async () => {
+        await GM_setValue('DEBUG_FORCE_NEXT_SYNC', true);
+        alert("設定しました。ページをリロードすると同期が開始されます。");
+    });
 
     addStyles();
-    console.log("MF Sync: v3.41 Logical SPA mode ready.");
+    console.log("MF Sync: v3.42 Logical SPA mode ready.");
 
     // --- 自動実行チェックと初期化 ---
     const autoSyncCheck = async () => {
         const lastSync = await GM_getValue('LAST_SYNC_TIME', 0);
+        const forceNext = await GM_getValue('DEBUG_FORCE_NEXT_SYNC', false);
         const now = Date.now();
-        const oneDay = 24 * 60 * 60 * 1000;
+        const interval = 1 * 60 * 60 * 1000; // 1時間間隔に短縮 (テストしやすさ・利便性のため)
 
-        console.log(`MF Sync: Auto-sync check. Last sync: ${new Date(lastSync).toLocaleString()}. Elapsed: ${Math.floor((now - lastSync) / 3600000)} hours.`);
+        console.log(`MF Sync: Auto-sync check. Last sync: ${new Date(lastSync).toLocaleString()}. Elapsed: ${((now - lastSync) / 3600000).toFixed(1)} hours.`);
 
         // 最終同期から1日以上経過、かつ、URLが cf (入出金) のページであることを確認
-        if (now - lastSync > oneDay) {
+        if (forceNext || (now - lastSync > interval)) {
             console.log("MF Sync: Condition met. Waiting for table...");
+            if (forceNext) {
+                console.log("MF Sync: Debug Force Sync triggered.");
+                await GM_setValue('DEBUG_FORCE_NEXT_SYNC', false); // フラグをリセット
+            }
             showStatus("オート同期をチェック中...", 3000);
 
             // テーブルが出るまで待つ
@@ -296,7 +305,7 @@
                 }
             }, 500);
         } else {
-            console.log("MF Sync: Auto-sync skipped (not enough time passed).");
+            console.log(`MF Sync: Auto-sync skipped. (Interval: ${interval / 3600000}h)`);
         }
     };
 
