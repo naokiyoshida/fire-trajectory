@@ -104,7 +104,7 @@ function handleSyncData(payload) {
   const existingIds = getExistingIds(sheet, idColumnIndex);
 
   // 受信したデータから、重複していない新しい行だけを抽出
-  const rowsToAppend = payload.data.filter(newRow => !existingIds.has(newRow.id))
+  const rowsToAppend = payload.data.filter(newRow => !existingIds.has(newRow.ID))
     .map(newRow => {
       // ヘッダーの順序に従ってデータを並べ替える
       const rowData = new Array(headers.length).fill('');
