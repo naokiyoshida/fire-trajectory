@@ -417,9 +417,15 @@
     GM_registerMenuCommand('強制フル同期 (2021/10〜)', () => startSyncSequence('FORCE_FULL'));
     GM_registerMenuCommand('同期を停止', () => { isRequestStop = true; showStatus("停止リクエスト送信済み..."); });
     GM_registerMenuCommand('GAS URLを再設定', promptAndSetGasUrl);
+
     GM_registerMenuCommand('【Debug】次回の読込時に強制同期', async () => {
         await GM_setValue('DEBUG_FORCE_NEXT_SYNC', true);
         alert("設定しました。ページをリロードすると同期が開始されます。");
+    });
+
+    GM_registerMenuCommand('【Debug】強制自動同期モード(URLパラメタ擬似)でリロード', async () => {
+        await GM_setValue('DEBUG_SIMULATE_SCHEDULER', true);
+        location.reload();
     });
 
     addStyles();
@@ -427,9 +433,17 @@
 
     // --- 起動時チェック: 保留中の同期 or オート同期判定 ---
     (async () => {
-        // タスクスケジューラからの起動判定 (URLパラメータ ?force_auto_sync=true)
         const urlParams = new URLSearchParams(window.location.search);
-        const isTaskScheduler = urlParams.get('force_auto_sync') === 'true';
+
+        // デバッグ用フラグのチェック & 消費
+        const isDebugScheduler = await GM_getValue('DEBUG_SIMULATE_SCHEDULER', false);
+        if (isDebugScheduler) {
+            console.log("MF Sync: Debug - Simulating Task Scheduler launch.");
+            await GM_setValue('DEBUG_SIMULATE_SCHEDULER', false);
+        }
+
+        // タスクスケジューラからの起動判定 (URLパラメータ ?force_auto_sync=true OR Debug Flag)
+        const isTaskScheduler = (urlParams.get('force_auto_sync') === 'true') || isDebugScheduler;
 
         // 1. 保留中の同期があるか？ (リダイレクト復帰など)
         const pendingMode = await GM_getValue('PENDING_SYNC_MODE', '');
