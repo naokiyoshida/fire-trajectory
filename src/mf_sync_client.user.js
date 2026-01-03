@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         fire-trajectory-sync-client
 // @namespace    http://tampermonkey.net/
-// @version      3.22
+// @version      3.30
 // @description  Money Forward MEのデータをGASへ自動同期します。(SPAボタン連打/論理カウンター版)
 // @author       Naoki Yoshida
 // @match        https://moneyforward.com/cf*
@@ -95,17 +95,21 @@
             const category = [catLarge, catMiddle].filter(c => c).join("/");
 
             if (dateRaw && content && amountRaw) {
+                // 1. 振替・計算対象外の除外
+                const isTransfer = row.classList.contains('is-transfer') || amountRaw.includes('(振替)');
+                const isExcluded = row.classList.contains('is-calculation-excluded') || row.querySelector('.icon-ban-circle'); // 計算対象外アイコン
+                if (isTransfer || isExcluded) return;
+
                 const dateMatch = dateRaw.match(/(\d{1,2})\s*[\/／]\s*(\d{1,2})/);
                 if (dateMatch) {
                     const m = dateMatch[1].padStart(2, '0');
                     const d = dateMatch[2].padStart(2, '0');
 
                     // 論理チェック: 画面上の月が、私たちが期待している月と一致する場合のみ採用
-                    // (SPAの反映遅れによる二重取得防止)
                     if (parseInt(m, 10) !== parseInt(month, 10)) return;
 
                     const date = `${year}/${m}/${d}`;
-                    const amount = amountRaw.replace(/[,円\s]/g, '');
+                    const amount = amountRaw.replace(/[,円\s]/g, '').replace(/\(振替\)/, '');
                     const uniqueString = `${date}-${content}-${amount}-${source}-${category}`;
                     const hashId = CryptoJS.SHA256(uniqueString).toString(CryptoJS.enc.Hex);
                     data.push({ ID: hashId, date, content, amount, source, category });
