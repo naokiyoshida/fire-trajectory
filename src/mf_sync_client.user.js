@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         fire-trajectory-sync-client
 // @namespace    http://tampermonkey.net/
-// @version      3.20
+// @version      3.21
 // @description  Money Forward MEのデータをGASへ自動同期します。(SPAボタン連打/論理カウンター版)
 // @author       Naoki Yoshida
 // @match        https://moneyforward.com/cf*
@@ -140,9 +140,12 @@
         try {
             const res = await gmFetch(gasUrl, { method: "POST", body: JSON.stringify({ action: "get_sync_config" }) });
             const config = JSON.parse(res.responseText);
-            if (forceFull || config.mode === 'Full') {
+            // 手動で「通常同期」を選んだ場合は、GAS側がFullを求めていても6ヶ月を優先する
+            if (forceFull) {
                 monthsToSync = (logicalYear - 2021) * 12 + (logicalMonth - 10) + 1;
                 monthsToSync = Math.max(monthsToSync, 6);
+            } else if (config.mode === 'Full') {
+                console.log("GAS Config suggested Full sync, but respecting manual 'Normal Sync' (6 months).");
             }
         } catch (e) { console.warn("GAS Config failed", e); }
 
