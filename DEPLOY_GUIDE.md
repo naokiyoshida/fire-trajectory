@@ -1,106 +1,65 @@
-# デプロイガイド (DEPLOY_GUIDE)
+# デプロイ・運用ガイド: fire-trajectory
 
-本プロジェクト『fire-trajectory』の開発環境セットアップおよび本番環境へのデプロイ手順を解説します。
+本プロジェクトの開発環境セットアップ、デプロイ、および日常の運用手順について解説します。
 
-## 1. はじめに
+## 1. 開発環境のセットアップ
 
-本ガイドは、ソースコードをフォークまたはクローンし、自身の環境（Google Apps Script および ローカルPC）で稼働させる開発者・利用者向けの手順書です。
+### 1.1. 前提ツール
 
-## 2. 開発環境セットアップ
+- **Git**: リポジトリ管理用
+- **Node.js**: `clasp` (GAS管理ツール) の実行に必要
 
-### 前提条件
-
-- Node.js (v16以上推奨)
-- Google アカウント
-
-### リポジトリの取得
+### 1.2. リポジトリの準備
 
 ```bash
 git clone https://github.com/your-username/fire-trajectory.git
 cd fire-trajectory
-```
-
-### 依存ツールのインストール
-
-GAS管理ツール `clasp` を使用します。
-
-```bash
 npm install -g @google/clasp
 clasp login
 ```
 
-ブラウザが開くので、Googleアカウントでログインして権限を承認してください。
+## 2. サーバーサイド (GAS) のデプロイ
 
-## 3. サーバーサイド (Google Apps Script) のデプロイ
+### 2.1. プロジェクトの紐付け
 
-### GASプロジェクトの作成/紐付け
+- **新規作成**: `clasp create --title "fire-trajectory" --rootDir ./src`
+- **既存紐付け**: `clasp clone "YOUR_SCRIPT_ID" --rootDir ./src`
 
-新規に作成する場合:
+### 2.2. コードの反映と公開
 
-```bash
-clasp create --type webapp --title "fire-trajectory-receiver"
-# 作成後、生成された .clasp.json の scriptId を確認してください
-```
+1. **アップロード**: `clasp push`
+2. **ウェブアプリ公開**:
+    - GASエディタで「新しいデプロイ」を選択。
+    - 種類「ウェブアプリ」、実行ユーザー「自分」、アクセス「自分のみ」でデプロイ。
+    - 発行された **ウェブアプリURL** をメモする。
 
-既存プロジェクトがある場合は `.clasp.json` の `scriptId` を更新してください。
+### 2.3. シミュレーションの初期化
 
-### コードの反映
+GASエディタで `setupSimulation` 関数を選択して実行します。これにより、スプレッドシートに `Settings` と `Simulation` シートが自動生成されます。
 
-```bash
-clasp push
-```
+## 3. クライアントサイドのセットアップ
 
-`src/gas_receiver_service.gs` および `appsscript.json` がアップロードされます。
+### 3.1. ユーザースクリプト (Tampermonkey)
 
-### ウェブアプリとしてデプロイ
+1. `src/mf_sync_client.user.js` を Tampermonkey に新規登録。
+2. スクリプト実行時、またはメニューから **ウェブアプリURL** を設定。
 
-1. GASエディタ (`clasp open`) を開く。
-2. 「デプロイ」 > 「新しいデプロイ」を選択。
-3. **種類の選択**: 「ウェブアプリ」
-4. **説明**: `v1` (任意)
-5. **次のユーザーとして実行**: **自分 (Me)**
-6. **アクセスできるユーザー**: **自分のみ (Only myself)** ※重要
-7. 「デプロイ」を実行し、発行された **ウェブアプリURL** (`https://script.google.com/.../exec`) をコピーする。
+### 3.2. GitHub自動更新 (推奨)
 
-### 環境変数の設定 (Secret Management)
+スクリプトヘッダーの `@updateURL` を自身の GitHub Raw URL に書き換えることで、コード修正を自動的に Tampermonkey へ反映できます。
 
-GASエディタの「プロジェクトの設定」 > 「スクリプト プロパティ」を開き、以下を追加してください。
+## 4. 自動実行の設定 (Windows)
 
-| プロパティ名 | 値 | 説明 |
-|---|---|---|
-| `SHEET_NAME` | `Database` | データを保存するシート名 (任意) |
-| `API_KEY` | (任意のランダム文字列) | 簡易認証用キー (任意だが推奨) |
+### 4.1. 起動スクリプトの調整
 
-## 4. クライアントサイド (UserScript) のセットアップ
+`RunSyncHidden.ps1` 内の `$ProfileDir` を、使用する Chrome のプロファイル名に合わせて修正します。
 
-### Tampermonkey へのインストール
+### 4.2. タスクスケジューラ
 
-1. Chromeに拡張機能「Tampermonkey」をインストール。
-2. `src/mf_sync_client.user.js` の内容をコピーし、新規スクリプトとして保存。
-3. **初期設定**: 初回実行時、またはメニューの「GAS URLを再設定」から、先ほど取得したGASの **ウェブアプリURL** を入力して保存する。
+- **プログラム**: `powershell.exe`
+- **引数**: `-ExecutionPolicy Bypass -File "C:\path\to\RunSyncHidden.ps1"`
+- **設定**: 「ユーザーがログオンしているかどうかにかかわらず実行する」は避け、「ログオンしているときのみ」＋「表示しない」を推奨します。
 
-### GitHub連携 (オプション)
+## 5. 秘匿情報の管理
 
-GitHub上のコード更新を自動反映させたい場合は、スクリプトヘッダーの `@downloadURL` / `@updateURL` を自身のフォークしたリポジトリの Raw URL に書き換えてください。
-
-## 5. 自動化セットアップ (Task Scheduler)
-
-完全自動化を行うための手順です。
-
-### PowerShellスクリプトの準備
-
-1. `RunSyncHidden.ps1` を任意のエディタで開く。
-2. `$ProfileDir` を、同期に使用するChromeプロファイル名（例: `"Profile 1"`）に変更する。
-
-### タスクスケジューラの設定
-
-1. Win+R > `taskschd.msc` でタスクスケジューラを起動。
-2. 「タスクの作成」を選択。
-    - **全般**: 「ユーザーがログオンしているときのみ実行する」+ **「表示しない (Hidden)」にチェック**。
-    - **トリガー**: 毎日 AM 4:00 など任意。
-    - **操作**:
-        - プログラム/スクリプト: `powershell`
-        - 引数: `-ExecutionPolicy Bypass -File "path\to\RunSyncHidden.ps1"`
-    - **条件**: 「コンピューターをAC電源で使用している場合のみ開始する」のチェックを外す（推奨）。
-
-これで、指定時刻に完全バックグラウンドで同期が実行されます。
+`API_KEY` などの重要設定は、GASの「スクリプトプロパティ」で管理します。これにより、GitHub にコードを公開しても認証情報が漏洩することはありません。
