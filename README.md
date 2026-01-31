@@ -22,7 +22,7 @@ Money Forward ME の資産データを自動収集・蓄積し、FIRE (Financial
        v
 [ Google Sheets ]
   - Database (蓄積データ)
-  - Settings (シミュレーション設定)
+  - Dashboard (シミュレーション設定)
   - Simulation (将来予測・資産推移グラフ)
 ```
 

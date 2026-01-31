@@ -35,7 +35,7 @@ clasp login
 
 ### 2.3. シミュレーションの初期化
 
-GASエディタで `setupSimulation` 関数を選択して実行します。これにより、スプレッドシートに `Settings` と `Simulation` シートが自動生成されます。
+GASエディタで `setupSimulation` 関数を選択して実行します。これにより、スプレッドシートに `Dashboard` と `Simulation` シートが自動生成されます。
 
 ## 3. クライアントサイドのセットアップ
 

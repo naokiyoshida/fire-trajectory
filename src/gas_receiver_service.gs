@@ -81,18 +81,31 @@ function isAuthorized(payload) {
  */
 function handleSyncConfig() {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
+  let simSetupStatus = "skipped";
+  
+  // シミュレーション環境が未構築（Dashboardがない）場合は自動作成
+  if (!ss.getSheetByName('Dashboard')) {
+    try {
+      setupSimulation();
+      simSetupStatus = "created";
+    } catch (e) {
+      simSetupStatus = "error: " + e.toString();
+      console.error("Setup Simulation Error: " + e.toString());
+    }
+  }
+
   let sheet = ss.getSheetByName(SHEET_NAME);
   
   // シートが存在しない場合は作成してヘッダーを設定
   if (!sheet) {
      sheet = ss.insertSheet(SHEET_NAME);
      initSheetHeader(sheet);
-     return createJsonResponse({ status: "success", mode: "Full" });
+     return createJsonResponse({ status: "success", mode: "Full", simSetup: simSetupStatus });
   }
 
   // データが少なければFull Syncを要求
   const mode = (sheet.getLastRow() <= 1) ? "Full" : "Incremental";
-  return createJsonResponse({ status: "success", mode: mode });
+  return createJsonResponse({ status: "success", mode: mode, simSetup: simSetupStatus });
 }
 
 /**
@@ -200,4 +213,214 @@ function getExistingIds(sheet, colIndex) {
 function createJsonResponse(obj) {
   return ContentService.createTextOutput(JSON.stringify(obj))
     .setMimeType(ContentService.MimeType.JSON);
+}
+
+/**
+ * シミュレーション環境のセットアップを行う。
+ * 1. Dashboard シートを作成し、初期値を入力
+ * 2. Simulation シートを作成し、数式を設定
+ */
+function setupSimulation() {
+  console.log("【開始】setupSimulation が呼び出されました。");
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  
+  // --- 1. Dashboard シートの作成・既存値の保存 ---
+  let dashSheet = ss.getSheetByName('Dashboard');
+  let existingValues = {}; // 既存の設定値を保持するMap {項目名: 値}
+
+  if (!dashSheet) {
+    console.log("Dashboardシートが存在しないため、新規作成します。");
+    dashSheet = ss.insertSheet('Dashboard');
+  } else {
+    console.log("既存のDashboardシートを検出しました。既存の設定値を読み込みます。");
+    // 既存データの読み込み (1行目はヘッダーなので2行目から)
+    const lastRow = dashSheet.getLastRow();
+    if (lastRow > 1) {
+      // A列(項目名)とB列(設定値)を取得
+      const range = dashSheet.getRange(2, 1, lastRow - 1, 2);
+      const values = range.getValues();
+      values.forEach(row => {
+        // キーがあり、値が空でない場合のみ保持
+        if (row[0] && row[1] !== "") {
+           existingValues[row[0]] = row[1];
+        }
+      });
+    }
+    dashSheet.clear(); // 一旦クリアしてレイアウト再構築
+  }
+  
+  // 定義データ構築
+  // B列: ユーザー設定値 (既存値があれば優先、なければデフォルト)
+  // D列: デフォルト値 (常に固定)
+  const headers = ['fire-trajectory: 設定', '設定値', '説明', 'デフォルト値'];
+  
+  // [項目名, デフォルト値, 説明]
+  const items = [
+    ['本人誕生日', '1977/03/09', 'YYYY/MM/DD'],
+    ['配偶者誕生日', '1976/06/27', 'YYYY/MM/DD'],
+    ['現在の資産', 25000000, 'シミュレーション開始時の資産 (円)'],
+    ['リタイア予定日', '2037/03/31', 'この日以降、本人収入停止'],
+    ['基本生活費_月額', 500000, 'ベースとなる生活費'],
+    ['運用利回り_名目', 0.05, '年率 (5% = 0.05)'],
+    ['インフレ率', 0.02, '年率 (2% = 0.02)'],
+    ['ローン完済予定日', '2042/03/31', '住宅ローン等の終了日'],
+    ['ローン月額', 100000, 'ローン返済額'],
+    ['本人年金_年額', 1800000, '65歳開始'],
+    ['配偶者年金_年額', 800000, '65歳開始'],
+    ['息子支援終了日', '2028/03/31', '教育費・養育費の終了'],
+    ['息子支援月額', 50000, '支援終了までかかる費用'],
+    ['配偶者年収_年額', 2000000, '配偶者の手取り年収'],
+    ['配偶者退職予定日', '2041/06/30', '配偶者の収入停止日'],
+    ['退職時一時金', 1000000, '配偶者退職時に加算'],
+    ['本人手取り月収', 500000, '本人の月次収入 (追加項目)']
+  ];
+
+  const dashboardData = [headers];
+  
+  items.forEach(item => {
+    const key = item[0];
+    const defaultVal = item[1];
+    const desc = item[2];
+    
+    // 既存値が存在すればそれを採用、なければデフォルト値
+    const currentVal = existingValues.hasOwnProperty(key) ? existingValues[key] : defaultVal;
+    
+    // [A:項目名, B:設定値, C:説明, D:デフォルト値]
+    dashboardData.push([key, currentVal, desc, defaultVal]);
+  });
+  
+  dashSheet.getRange(1, 1, dashboardData.length, 4).setValues(dashboardData);
+  dashSheet.setColumnWidth(1, 200);
+  dashSheet.setColumnWidth(2, 150);
+  dashSheet.setColumnWidth(3, 200);
+  dashSheet.setColumnWidth(4, 150);
+  dashSheet.getRange("A1:D1").setBackground('#e6f7ff').setFontWeight('bold');
+
+  // --- 2. Simulation シートの作成 ---
+  let simSheet = ss.getSheetByName('Simulation');
+  if (!simSheet) {
+    simSheet = ss.insertSheet('Simulation');
+  }
+  simSheet.clear();
+
+  const simHeaders = ['年月', '本人年齢', '期首資産', '収入', '支出', '収支', '実質利回り(月)', '期末資産'];
+  simSheet.getRange(1, 1, 1, simHeaders.length).setValues([simHeaders]).setBackground('#f3f3f3').setFontWeight('bold');
+
+  // 開始月を設定 (現在月)
+  const startDate = new Date();
+  startDate.setDate(1);
+
+  const initialRows = 360; // 30年分
+  const rows = [];
+  
+  // Dashboardのセル参照定義 (絶対参照)
+  const D = {
+    UserBday: 'Dashboard!$B$2',
+    SpouseBday: 'Dashboard!$B$3',
+    CurrentAsset: 'Dashboard!$B$4',
+    RetireDate: 'Dashboard!$B$5',
+    BasicExpense: 'Dashboard!$B$6',
+    NominalYield: 'Dashboard!$B$7',
+    Inflation: 'Dashboard!$B$8',
+    GtLoanDate: 'Dashboard!$B$9',
+    LoanAmount: 'Dashboard!$B$10',
+    UserPension: 'Dashboard!$B$11',
+    SpousePension: 'Dashboard!$B$12',
+    GtSonDate: 'Dashboard!$B$13',
+    SonAmount: 'Dashboard!$B$14',
+    SpouseIncome: 'Dashboard!$B$15',
+    GtSpouseRetire: 'Dashboard!$B$16',
+    RetireLump: 'Dashboard!$B$17',
+    UserMonthly: 'Dashboard!$B$18'
+  };
+
+  for (let i = 0; i < initialRows; i++) {
+    const targetDate = new Date(startDate.getFullYear(), startDate.getMonth() + i, 1);
+    const dateStr = Utilities.formatDate(targetDate, "GMT+9", "yyyy/MM");
+    const dateSerial = `DATE(${targetDate.getFullYear()}, ${targetDate.getMonth()+1}, 1)`;
+    
+    // 年齢 (Excel数式で計算させるため、ここではJSでシンプルに入れておくか、DATEDIFを使う)
+    // ここではJSで計算した固定値を入れる (シミュレーション開始時点からの経過月数で加算も可だが、行ごとに計算)
+    const rowIdx = i + 2;
+    
+    // 年齢計算式: DATEDIF(誕生日, その月, "Y")
+    const ageFormula = `=DATEDIF(${D.UserBday}, ${dateSerial}, "Y")`;
+
+    // 期首資産
+    const openingBalance = (i === 0) ? `=${D.CurrentAsset}` : `=H${rowIdx - 1}`;
+    
+    // 収入ロジック
+    // 1. 本人給与: リタイア日まで
+    // 2. 配偶者給与: 退職日まで (年額/12)
+    // 3. 本人年金: 65歳以降 (EDATE(誕生日, 12*65) < DATE) (年額/12)
+    // 4. 配偶者年金: 65歳以降 (年額/12)
+    // 5. 一時金: 配偶者退職月に加算
+    
+    // ※複雑になるため、IF文を分割して加算
+    const incUser = `IF(${dateSerial} <= ${D.RetireDate}, ${D.UserMonthly}, 0)`;
+    const incSpouse = `IF(${dateSerial} <= ${D.GtSpouseRetire}, ${D.SpouseIncome}/12, 0)`;
+    // 年金開始日 = 誕生日 + 65年.  EDATEで計算
+    const startUserPen = `EDATE(${D.UserBday}, 12*65)`;
+    const startSpousePen = `EDATE(${D.SpouseBday}, 12*65)`;
+    const incUserPen = `IF(${dateSerial} >= ${startUserPen}, ${D.UserPension}/12, 0)`;
+    const incSpousePen = `IF(${dateSerial} >= ${startSpousePen}, ${D.SpousePension}/12, 0)`;
+    const incLump = `IF(TEXT(${dateSerial},"yyyyMM")=TEXT(${D.GtSpouseRetire},"yyyyMM"), ${D.RetireLump}, 0)`;
+    
+    const income = `=${incUser} + ${incSpouse} + ${incUserPen} + ${incSpousePen} + ${incLump}`;
+
+    // 支出ロジック
+    // 1. 基本生活費
+    // 2. ローン: 完済日まで
+    // 3. 息子支援: 終了日まで
+    const expBasic = `${D.BasicExpense}`;
+    const expLoan = `IF(${dateSerial} <= ${D.GtLoanDate}, ${D.LoanAmount}, 0)`;
+    const expSon = `IF(${dateSerial} <= ${D.GtSonDate}, ${D.SonAmount}, 0)`;
+    
+    const expense = `=${expBasic} + ${expLoan} + ${expSon}`;
+
+    // 実質利回り (月次)
+    const monthlyRealYield = `=((1+${D.NominalYield})/(1+${D.Inflation}))^(1/12) - 1`;
+
+    rows.push([
+      dateStr,
+      ageFormula,
+      openingBalance,
+      income,
+      expense,
+      `=D${rowIdx}-E${rowIdx}`,
+      monthlyRealYield,
+      `=(C${rowIdx}+F${rowIdx})*(1+G${rowIdx})`
+    ]);
+  }
+  
+  simSheet.getRange(2, 1, rows.length, simHeaders.length).setValues(rows);
+  createTrajectoryChart(simSheet);
+
+  console.log("【完了】setupSimulation が正常に終了しました。");
+  return createJsonResponse({ status: "success", message: "Simulation sheets initialized (Dashboard ver)." });
+}
+
+function createTrajectoryChart(sheet) {
+  const lastRow = sheet.getLastRow();
+  if (lastRow < 2) return;
+  
+  // 既存のチャートがあれば削除
+  const existingCharts = sheet.getCharts();
+  for (const c of existingCharts) {
+    sheet.removeChart(c);
+  }
+
+  const chart = sheet.newChart()
+    .setChartType(Charts.ChartType.AREA)
+    .addRange(sheet.getRange(1, 1, lastRow, 1)) // 年月
+    .addRange(sheet.getRange(1, 8, lastRow, 1)) // 期末資産
+    .setPosition(2, 10, 0, 0)
+    .setOption('title', '資産推移シミュレーション')
+    .setOption('hAxis', {title: '年月'})
+    .setOption('vAxis', {title: '資産額 (円)'})
+    .setOption('width', 900)
+    .setOption('height', 500)
+    .build();
+  
+  sheet.insertChart(chart);
 }
