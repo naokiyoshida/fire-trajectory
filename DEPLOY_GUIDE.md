@@ -91,11 +91,11 @@ npm run sync
 ```
 
 初回実行で Sheets に以下が作られます:
-- `Database` (取引明細)
-- `Assets_Monthly` (資産スナップショット 1行追記)
-- `Manual_Assets` (空、後述の手動入力用)
+- `取引履歴` (取引明細)
+- `資産推移` (資産スナップショット 1行追記)
+- `手動入力資産` (空、後述の手動入力用)
 
-その後、Sheets を開いてメニューバーの **Fire Trajectory → シミュレーションの再構築** を実行（GAS が `Dashboard` と `Simulation` を作成）。続けて **Fire Trajectory → レポートの再構築** を実行（`Report_CashFlow`、`Report_Spending`、`Report_NetWorth`、`Report_Allocation`、`Report_FIRE_Readiness` を作成）。
+その後、Sheets を開いてメニューバーの **Fire Trajectory → シミュレーションの再構築** を実行（GAS が `設定` と `シミュレーション` を作成）。続けて **Fire Trajectory → レポートの再構築** を実行（`月次収支`、`カテゴリ別支出`、`純資産推移`、`資産配分`、`FIRE射程` を作成）。
 
 GAS メニューが見えない場合は `clasp push` でGASコードをアップロードしてください:
 ```powershell
@@ -105,16 +105,16 @@ clasp clone <SCRIPT_ID> --rootDir .
 clasp push
 ```
 
-### 6.1 Manual_Assets の使い方
+### 6.1 「手動入力資産」シートの使い方
 
-マネフォME に未連携の資産（インテグレ等の未上場株式）は `Manual_Assets` シートで手動管理します。
+マネフォME に未連携の資産（未上場株式など）は `手動入力資産` シートで手動管理します。
 
-| key (A列) | value (B列) | notes (C列) |
+| 項目 (A列) | 値 (B列) | 備考 (C列) |
 |---|---|---|
-| stocks_unlisted | 1550000 | インテグレ等の未上場株式 |
-| notes | 任意の補足メモ | |
+| 未上場株式 | 1550000 | 未上場の自社株など |
+| 備考 | 任意の補足メモ | |
 
-`stocks_unlisted` の値は次回 `npm run sync` で `Assets_Monthly.stocks_unlisted` に取り込まれ、`total_assets` に加算されます。
+「未上場株式」の値は次回 `npm run sync` で `資産推移.株式（未上場）` に取り込まれ、`資産総額` に加算されます。`手動入力資産` の「項目」列は厳密に一致させる必要があります（現在対応しているラベルは `未上場株式` と `備考` の2つだけ）。
 
 ## 7. タスクスケジューラ登録（月次自動化）
 
@@ -153,6 +153,30 @@ clasp push
 4. 失敗時に `[fire-trajectory ERROR] <command> failed` というメールが届きます
 
 未設定の場合は ConsoleNotifier にフォールバックし、ログにのみ出力されます。
+
+## 8.5 既存環境を日本語シート名に切り替える（マイグレーション）
+
+過去バージョンで構築した `Database` / `Assets_Monthly` / `Manual_Assets` / `Dashboard` / `Simulation` / `Report_*` シートを抱えている場合の移行手順。
+
+1. `git pull` 後、`clasp push` で最新の GAS スクリプトをアップロード
+2. Sheets を開き、ダミーシート（一時的な空シート）を1つ作成しておく
+   - Sheets はすべてのシートを削除できないため、削除前に1枚以上残す必要がある
+3. 旧シートをまとめて削除:
+   `Database` / `Assets_Monthly` / `Manual_Assets` / `Dashboard` / `Simulation` / `Report_CashFlow` / `Report_Spending` / `Report_NetWorth` / `Report_Allocation` / `Report_FIRE_Readiness`
+4. ターミナルで Full Sync を実行:
+   ```powershell
+   npm run sync:full
+   ```
+   → `取引履歴` / `資産推移` / `手動入力資産` の3シートが日本語ヘッダーで新規作成される
+5. `手動入力資産` の A 列に手動入力のラベルを再登録:
+   - 1 行目はヘッダー (`項目` / `値` / `備考`、自動作成済み)
+   - 2 行目以降に `未上場株式` / `備考` のラベルで値を入れ直す
+   - **旧 `stocks_unlisted` / `notes` のラベルは無視される**ため必ず日本語に直すこと
+6. メニュー **Fire Trajectory → シミュレーションの再構築** を実行 → `設定` / `シミュレーション` 作成
+7. メニュー **Fire Trajectory → レポートの再構築** を実行 → `月次収支` / `カテゴリ別支出` / `純資産推移` / `資産配分` / `FIRE射程` 作成
+8. 手順2で作ったダミーシートを削除
+
+これで全 10 シートが日本語名で揃う。タスクスケジューラの設定変更は不要（PowerShell スクリプトはシート名に依存しない）。
 
 ## 9. トラブルシューティング
 

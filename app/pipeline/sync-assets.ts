@@ -5,6 +5,7 @@ import {
   appendRows,
   createSheetsClient,
   ensureSheet,
+  quoteSheetName,
   readColumnValues,
   type SheetsClient,
 } from "../core/sheets-client.js";
@@ -21,8 +22,30 @@ import {
 } from "../scrapers/assets/schema.js";
 import { buildAssetSnapshot } from "../scrapers/assets/transformer.js";
 
-export const ASSETS_SHEET_NAME = "Assets_Monthly";
-export const ASSETS_HEADERS = [
+export const ASSETS_SHEET_NAME = "資産推移";
+
+// 資産推移シートのヘッダー（表示は日本語、内部キーとの対応は ASSETS_KEY_ORDER に定義）
+export const ASSETS_HEADERS: string[] = [
+  "基準日",
+  "預金・現金",
+  "株式（現物）",
+  "株式（未上場）",
+  "投資信託",
+  "年金",
+  "ポイント",
+  "その他資産",
+  "資産総額",
+  "クレジット未払",
+  "住宅ローン",
+  "その他負債",
+  "負債総額",
+  "純資産",
+  "備考",
+];
+
+// AssetSnapshot の内部キーを日本語ヘッダーと同じ順序で並べたもの
+// （列順とヘッダー数を一致させるための単一情報源）
+export const ASSETS_KEY_ORDER: string[] = [
   "snapshot_date",
   "cash",
   "stocks_listed",
@@ -40,8 +63,14 @@ export const ASSETS_HEADERS = [
   "notes",
 ];
 
-export const MANUAL_ASSETS_SHEET_NAME = "Manual_Assets";
-export const MANUAL_ASSETS_HEADERS = ["key", "value", "notes"];
+export const MANUAL_ASSETS_SHEET_NAME = "手動入力資産";
+export const MANUAL_ASSETS_HEADERS = ["項目", "値", "備考"];
+
+// 手動入力資産シートの「項目」列に書く日本語ラベル → 内部キー
+const MANUAL_LABEL_TO_KEY: Record<string, "stocks_unlisted" | "notes"> = {
+  "未上場株式": "stocks_unlisted",
+  "備考": "notes",
+};
 
 export interface SyncAssetsOptions {
   dryRun?: boolean;
@@ -64,18 +93,20 @@ export function todayJstYmd(now: Date = new Date()): string {
 }
 
 async function loadManualAssets(sheets: SheetsClient): Promise<ManualAssets> {
-  const range = `${MANUAL_ASSETS_SHEET_NAME}!A2:C`;
+  const range = `${quoteSheetName(MANUAL_ASSETS_SHEET_NAME)}!A2:C`;
   const res = await sheets.api.spreadsheets.values.get({
     spreadsheetId: sheets.spreadsheetId,
     range,
   });
   const rows = (res.data.values ?? []) as string[][];
+  // 「項目」列に日本語ラベルを書いてもらい、内部では英字キーで保持する
   const map: Record<string, string> = {};
   for (const r of rows) {
-    const key = r[0];
-    if (typeof key === "string" && key.length > 0) {
-      map[key] = r[1] ?? "";
-    }
+    const label = r[0];
+    if (typeof label !== "string" || label.length === 0) continue;
+    const key = MANUAL_LABEL_TO_KEY[label];
+    if (!key) continue;
+    map[key] = r[1] ?? "";
   }
 
   const rawValue = map.stocks_unlisted ?? "";
@@ -127,7 +158,7 @@ export async function syncAssets(
 
     manual = await loadManualAssets(sheets);
     logger.info(
-      `Manual_Assets loaded: stocks_unlisted=${manual.stocks_unlisted}, notes="${manual.notes}"`,
+      `${MANUAL_ASSETS_SHEET_NAME} loaded: stocks_unlisted=${manual.stocks_unlisted}, notes="${manual.notes}"`,
     );
   }
 
@@ -161,8 +192,8 @@ export async function syncAssets(
     }
 
     if (sheets) {
-      const row = ASSETS_HEADERS.map((h) => {
-        const v = (snapshot as Record<string, unknown>)[h];
+      const row = ASSETS_KEY_ORDER.map((k) => {
+        const v = (snapshot as Record<string, unknown>)[k];
         return typeof v === "number" ? v : String(v ?? "");
       });
       await appendRows(sheets, ASSETS_SHEET_NAME, [row]);

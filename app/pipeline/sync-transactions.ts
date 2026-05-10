@@ -17,7 +17,7 @@ import {
 import { TransactionSchema, type Transaction } from "../scrapers/transactions/schema.js";
 import { dedupeById, toTransaction } from "../scrapers/transactions/transformer.js";
 
-export const DATABASE_SHEET_NAME = "Database";
+export const DATABASE_SHEET_NAME = "取引履歴";
 export const DATABASE_HEADERS = [
   "ID",
   "日付",

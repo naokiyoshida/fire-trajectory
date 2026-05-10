@@ -48,13 +48,15 @@
 | Schema | `schema.ts` | zod による型・整合性検証 | フィールド増減 |
 | Transformer | `transformer.ts` | 内部表現 → Sheets 形式 | データフォーマット変化 |
 
-各層は独立してテスト可能で、`tests/scrapers/**` に純関数のユニットテストがある（28本、vitest）。
+各層は独立してテスト可能で、`tests/scrapers/**` に純関数のユニットテストがある（35本、vitest）。
+
+> **シート命名規則**: 数値層のシート名はすべて日本語に統一されている (`取引履歴` / `資産推移` / `手動入力資産` / `設定` / `シミュレーション` / `月次収支` / `カテゴリ別支出` / `純資産推移` / `資産配分` / `FIRE射程`)。Sheets API でアクセスする際は `'シート名'!範囲` 形式の引用が必要。Node 側は `app/core/sheets-client.ts` の `quoteSheetName` ヘルパーが、GAS 側は `quoteSheetName_` 関数が引用を担う。
 
 ---
 
 ## 3. データモデル
 
-### 3.1 Database シート（取引明細）
+### 3.1 「取引履歴」シート
 
 Node が `Google Sheets API` で書き込み。
 
@@ -71,47 +73,49 @@ Node が `Google Sheets API` で書き込み。
 **重複排除**: 既存A列のIDセットを取得して、新規分のみ追記。
 **振替・除外**: マネフォME 上で「振替」または「計算対象外」フラグの行はスキップ。
 
-### 3.2 Assets_Monthly シート（資産スナップショット）
+### 3.2 「資産推移」シート（資産スナップショット）
 
-Node が月1回 1行追記。当月分が既存ならスキップ（冪等）。
+Node が月1回 1行追記。当月分が既存ならスキップ（冪等）。表示は日本語ヘッダーだが、Node 側は `ASSETS_KEY_ORDER` という内部キー定義を保持し、列順を一意に決定する。
 
-| 列 | 名称 | 型 | 説明 |
-|---|---|---|---|
-| A | snapshot_date | string (`YYYY-MM-DD`) | スナップショット日（JST） |
-| B | cash | int | 預金・現金・暗号資産（外貨建て口座も含む） |
-| C | stocks_listed | int | 株式（現物） |
-| D | stocks_unlisted | int | Manual_Assets の `stocks_unlisted` から |
-| E | funds | int | 投資信託 |
-| F | pension | int | 年金（DC含む） |
-| G | points | int | ポイント・マイル |
-| H | other_assets | int | 上記カテゴリに該当しない資産（マッピング外を集約） |
-| I | total_assets | int | scraped 合計 + stocks_unlisted |
-| J | credit_card | int | クレジットカード未払残高 |
-| K | mortgage | int | 住宅ローン残高 |
-| L | other_loans | int | その他ローン（自動車、奨学金、その他の負債） |
-| M | total_liabilities | int | 負債総額（マネフォME 表示値） |
-| N | net_worth | int | total_assets - total_liabilities |
-| O | notes | string | Manual_Assets の `notes` から |
+| 列 | 表示ヘッダー | 内部キー | 型 | 説明 |
+|---|---|---|---|---|
+| A | 基準日 | snapshot_date | string (`YYYY-MM-DD`) | スナップショット日（JST） |
+| B | 預金・現金 | cash | int | 預金・現金・暗号資産（外貨建て口座も含む） |
+| C | 株式（現物） | stocks_listed | int | 株式（現物） |
+| D | 株式（未上場） | stocks_unlisted | int | 「手動入力資産」の `未上場株式` から |
+| E | 投資信託 | funds | int | 投資信託 |
+| F | 年金 | pension | int | 年金（DC含む） |
+| G | ポイント | points | int | ポイント・マイル |
+| H | その他資産 | other_assets | int | 上記カテゴリに該当しない資産（マッピング外を集約） |
+| I | 資産総額 | total_assets | int | scraped 合計 + stocks_unlisted |
+| J | クレジット未払 | credit_card | int | クレジットカード未払残高 |
+| K | 住宅ローン | mortgage | int | 住宅ローン残高 |
+| L | その他負債 | other_loans | int | その他ローン（自動車、奨学金、その他の負債） |
+| M | 負債総額 | total_liabilities | int | 負債総額（マネフォME 表示値） |
+| N | 純資産 | net_worth | int | 資産総額 − 負債総額 |
+| O | 備考 | notes | string | 「手動入力資産」の `備考` から |
 
 **整合性検証** (zod refine):
 - 資産: `cash + stocks_listed + funds + pension + points + other_assets ≈ total_assets_mf`（誤差±1円）
 - 負債: `credit_card + mortgage + other_loans ≈ total_liabilities_mf`
 
-### 3.3 Manual_Assets シート（手動入力）
+### 3.3 「手動入力資産」シート
 
 ユーザーが管理。マネフォME に未連携の資産・補足メモ用。
 
 | 列 | 名称 |
 |---|---|
-| A | key |
-| B | value |
-| C | notes |
+| A | 項目 |
+| B | 値 |
+| C | 備考 |
 
-現状の認識キー:
-- `stocks_unlisted`: インテグレ等の未上場株式の評価額
-- `notes`: スナップショットに添える自由テキスト
+「項目」列で受け付けるラベルは厳密に以下の2種:
+- `未上場株式` → 内部キー `stocks_unlisted` (int 円。「資産推移」の D 列に書き込まれる)
+- `備考` → 内部キー `notes` (string。スナップショットに添える自由テキスト)
 
-### 3.4 Dashboard シート（シミュレーション入力）
+ラベルが一致しない行は無視される。
+
+### 3.4 「設定」シート（シミュレーション入力）
 
 GAS の `setupSimulation()` が初期化。B列の既存値があれば保持される（再実行で上書きされない）。
 
@@ -119,7 +123,7 @@ GAS の `setupSimulation()` が初期化。B列の既存値があれば保持さ
 |---|---|---|---|
 | 2 | 本人誕生日 | YYYY/MM/DD | 1977/03/09 |
 | 3 | 配偶者誕生日 | YYYY/MM/DD | 1976/06/27 |
-| 4 | 現在の資産 | 数式参照 | `Assets_Monthly` 最新の `net_worth` |
+| 4 | 現在の資産 | 数式参照 | 「資産推移」最新の `純資産` |
 | 5 | リタイア予定日 | YYYY/MM/DD | 2037/03/31 |
 | 6 | 基本生活費_月額 | int (円) | 350,000 |
 | 7 | 運用利回り_名目 | 0.05 | 0.05 |
@@ -132,26 +136,39 @@ GAS の `setupSimulation()` が初期化。B列の既存値があれば保持さ
 | 14 | 息子支援月額 | int (円) | 50,000 |
 | 15 | 配偶者年収_年額 | int (円) | 2,400,000 |
 | 16 | 配偶者退職予定日 | YYYY/MM/DD | 2041/06/30 |
-| 17 | 退職時一時金 | int (円) | 3,000,000 |
-| 18 | 本人手取り月収 | int (円) | 500,000 |
+| 17 | 本人退職時一時金 | int (円) | 3,000,000 |
+| 18 | 配偶者退職時一時金 | int (円) | 0 |
+| 19 | 本人手取り月収 | int (円) | 500,000 |
+| 20 | 本人年金開始年齢 | int (歳) | 65 |
+| 21 | 配偶者年金開始年齢 | int (歳) | 65 |
+| 22 | FIRE射程_盤石閾値 | int (円) | 30,000,000 |
+| 23 | FIRE射程_余裕閾値 | int (円) | 5,000,000 |
+| 24 | シミュレーション終了年齢 | int (歳) | 100 |
 
 デフォルト値はナラティブ層（別 Claude プロジェクト「資産運用計画」）と同期。
 
-### 3.5 Simulation シート（FIRE 月次予測）
+**視覚化ルール**:
+- B 列（編集可能セル）: 黄色背景 `#fff3cd`
+- D 列（デフォルト値、参照のみ）: 灰色背景 + 斜体
+- 「手動入力資産」の B/C 列も同様に黄色背景
+
+**フォーマット**: 金額セルは `¥#,##0`、日付セルは `yyyy/MM/dd`、利率セルは `0.00%` で表示。`applyFormatting()` メニューから手動再適用可能。
+
+### 3.5 「シミュレーション」シート（FIRE 月次予測）
 
 GAS が 100歳まで月次360行を構築。
 
 列: 年月 / 本人年齢 / 期首資産 / 収入 / 支出 / 収支 / 実質利回り(月) / 期末資産
 
-### 3.6 Report_* シート群
+### 3.6 集計シート群
 
-GAS の `setupReports()` が QUERY 関数ベースで構築。データはすべて Database / Assets_Monthly / Simulation を参照。
+GAS の `setupReports()` が QUERY 関数ベースで構築。データはすべて「取引履歴」「資産推移」「シミュレーション」を参照。
 
-- `Report_CashFlow`: 月次収支差・収入・支出（3エリア）
-- `Report_Spending`: カテゴリ別支出合計
-- `Report_NetWorth`: Assets_Monthly のミラー（snapshot_date / total_assets / total_liabilities / net_worth）
-- `Report_Allocation`: 最新月の資産配分（13項目）
-- `Report_FIRE_Readiness`: スナップショット日 / 現在純資産 / 100歳時点予想資産 / 65歳時点予想資産 / 資産枯渇月 / 余裕度判定
+- `月次収支`: 月別収支差・収入・支出（3エリア）
+- `カテゴリ別支出`: 大項目/中項目別の支出合計
+- `純資産推移`: 「資産推移」のミラー（基準日 / 資産総額 / 負債総額 / 純資産）
+- `資産配分`: 最新月の資産配分（13項目）
+- `FIRE射程`: スナップショット日 / 現在純資産 / 100歳時点予想資産 / 65歳時点予想資産 / 資産枯渇月 / 余裕度判定
 
 ---
 
@@ -160,25 +177,26 @@ GAS の `setupReports()` が QUERY 関数ベースで構築。データはすべ
 ### 4.1 実質利回り（フィッシャー方程式）
 
 - 年間実質利回り `r = ((1 + n) / (1 + i)) - 1`
-  - `n`: 名目利回り (`Dashboard!B7`)
-  - `i`: インフレ率 (`Dashboard!B8`)
+  - `n`: 名目利回り (「設定」!B7)
+  - `i`: インフレ率 (「設定」!B8)
 - 月次実質利回り `r_m = (1 + r)^(1/12) - 1`
 - 資産更新式: `P_t = (P_{t-1} + CF_t) × (1 + r_m)`
 
 ### 4.2 ライフイベント制御
 
-`Dashboard` シートの設定値に基づき、月次キャッシュフローを動的に切り替える。
+「設定」シートの値に基づき、月次キャッシュフローを動的に切り替える。
 
 - **収入**:
-  - 本人給与: リタイア予定日 (`B5`) まで
-  - 配偶者給与: 配偶者退職予定日 (`B16`) まで
-  - 本人年金: 65歳到達月以降
-  - 配偶者年金: 65歳到達月以降
-  - 退職一時金: 配偶者退職月に加算
+  - 本人給与: リタイア予定日 (「設定」!B5) まで
+  - 配偶者給与: 配偶者退職予定日 (「設定」!B16) まで
+  - 本人年金: 「設定」!B20（本人年金開始年齢、デフォルト65）到達月以降
+  - 配偶者年金: 「設定」!B21（配偶者年金開始年齢、デフォルト65）到達月以降。本人と独立に繰上/繰下を設定できる
+  - 本人退職時一時金: 本人リタイア予定月に加算（「設定」!B17）
+  - 配偶者退職時一時金: 配偶者退職予定月に加算（「設定」!B18、デフォルト 0 = 当てにしない）
 - **支出**:
   - 基本生活費: 全期間
-  - 住宅ローン: 完済予定日 (`B9`) まで
-  - 息子支援: 支援終了日 (`B13`) まで
+  - 住宅ローン: 完済予定日 (「設定」!B9) まで
+  - 息子支援: 支援終了日 (「設定」!B13) まで
 
 ---
 
@@ -234,14 +252,15 @@ GAS の `setupReports()` が QUERY 関数ベースで構築。データはすべ
 
 ## 7. テスト戦略
 
-vitest による純関数ユニットテスト 28本:
+vitest による純関数ユニットテスト 35本:
 - `tests/scrapers/transactions/transformer.test.ts`: SHA256 ID 生成、重複排除
 - `tests/scrapers/transactions/extractor.test.ts`: 金額クリーニング、日付パース
 - `tests/scrapers/transactions/navigator.test.ts`: 月送りロジック、ヘッダー判定
 - `tests/scrapers/assets/extractor.test.ts`: 円通貨パース
 - `tests/scrapers/assets/transformer.test.ts`: scraped + manual の合算
 - `tests/auth/session.test.ts`: ログインURL判定
-- `tests/core/sheets-client.test.ts`: 列番号変換
+- `tests/core/sheets-client.test.ts`: 列番号変換、シート名引用 (`quoteSheetName`)
+- `tests/pipeline/sync-transactions.test.ts`: Full Sync の月数計算
 
 ブラウザ操作・Sheets API は実機ドライランで検証:
 - `npm run sync:dry`: ブラウザを起動してスクレイピングのみ、Sheets 書き込みなし

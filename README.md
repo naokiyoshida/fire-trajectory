@@ -16,13 +16,14 @@ Money Forward ME の取引明細と資産スナップショットを月次で自
    └ 失敗時は Gmail で通知
    │
    ▼
-[Google Sheets] - 数値層
-   ├ Database          (取引明細、Node が書き込み)
-   ├ Assets_Monthly    (月次の資産スナップショット、Node が書き込み)
-   ├ Manual_Assets     (インテグレ等の手動入力、ユーザーが管理)
-   ├ Dashboard         (シミュレーション入力、GAS が初期化)
-   ├ Simulation        (FIRE 月次予測、GAS が構築)
-   └ Report_*          (集計レポート、GAS が QUERY で構築)
+[Google Sheets] - 数値層 (シート名はすべて日本語)
+   ├ 取引履歴       (取引明細、Node が書き込み)
+   ├ 資産推移       (月次の資産スナップショット、Node が書き込み)
+   ├ 手動入力資産   (未上場株式等の手動入力、ユーザーが管理)
+   ├ 設定           (シミュレーション入力、GAS が初期化)
+   ├ シミュレーション (FIRE 月次予測、GAS が構築)
+   └ 月次収支 / カテゴリ別支出 / 純資産推移 / 資産配分 / FIRE射程
+                    (集計レポート、GAS が QUERY で構築)
    │
    ▼
 [Claude プロジェクト「資産運用計画」] - ナラティブ層
@@ -39,9 +40,9 @@ Money Forward ME の取引明細と資産スナップショットを月次で自
 | パイプライン | `app/pipeline/sync-transactions.ts`, `app/pipeline/sync-assets.ts` | スクレイプ → 検証 → Sheets 書き込みの統括 |
 | 共通コア | `app/core/` | browser (Playwright), sheets-client (Sheets API), notifier (Gmail SMTP), config (zod), logger, errors |
 | 認証 | `app/auth/` | 初回ログインフローと storageState 管理 |
-| GAS | `src/gas_receiver_service.gs` | Dashboard / Simulation / Report_* シートの構築 (`setupSimulation`, `setupReports`) |
+| GAS | `src/gas_receiver_service.gs` | 「設定」「シミュレーション」「月次収支」等のシート構築 (`setupSimulation`, `setupReports`) |
 | ランチャ | `scripts/run-sync.ps1` | Windows タスクスケジューラ用 |
-| テスト | `tests/` | vitest による純関数テスト (28本) |
+| テスト | `tests/` | vitest による純関数テスト (35本) |
 
 ## 設計原則
 

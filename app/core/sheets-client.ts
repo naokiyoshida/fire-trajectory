@@ -30,6 +30,15 @@ export async function listSheets(client: SheetsClient): Promise<string[]> {
   return titles;
 }
 
+/**
+ * Sheets API の A1 表記でシート名を安全に引用する。
+ * 日本語や記号を含むシート名は 'シングルクォート' で囲む必要があり、
+ * 名前自体に ' を含む場合は '' にエスケープする。
+ */
+export function quoteSheetName(name: string): string {
+  return `'${name.replace(/'/g, "''")}'`;
+}
+
 export async function ensureSheet(
   client: SheetsClient,
   name: string,
@@ -48,7 +57,8 @@ export async function ensureSheet(
     logger.info(`Created sheet: ${name}`);
   }
 
-  const headerRange = `${name}!A1:${columnLetter(headers.length)}1`;
+  const quoted = quoteSheetName(name);
+  const headerRange = `${quoted}!A1:${columnLetter(headers.length)}1`;
   const res = await client.api.spreadsheets.values.get({
     spreadsheetId: client.spreadsheetId,
     range: headerRange,
@@ -59,7 +69,7 @@ export async function ensureSheet(
   if (current.length === 0) {
     await client.api.spreadsheets.values.update({
       spreadsheetId: client.spreadsheetId,
-      range: `${name}!A1`,
+      range: `${quoted}!A1`,
       valueInputOption: "USER_ENTERED",
       requestBody: { values: [headers] },
     });
@@ -76,7 +86,7 @@ export async function readColumnValues(
   column: string,
   startRow = 2,
 ): Promise<string[]> {
-  const range = `${sheetName}!${column}${startRow}:${column}`;
+  const range = `${quoteSheetName(sheetName)}!${column}${startRow}:${column}`;
   const res = await client.api.spreadsheets.values.get({
     spreadsheetId: client.spreadsheetId,
     range,
@@ -98,7 +108,7 @@ export async function appendRows(
   if (rows.length === 0) return;
   await client.api.spreadsheets.values.append({
     spreadsheetId: client.spreadsheetId,
-    range: `${sheetName}!A1`,
+    range: `${quoteSheetName(sheetName)}!A1`,
     valueInputOption: "USER_ENTERED",
     insertDataOption: "INSERT_ROWS",
     requestBody: { values: rows },
