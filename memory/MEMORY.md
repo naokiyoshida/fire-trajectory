@@ -1,0 +1,7 @@
+- [User profile](user_profile.md) — Naoki's FIRE planning context, family, narrative/numerical layer split
+- [Architecture migration](architecture_migration.md) — 2026-05-10 decision to migrate to Playwright + Node.js (active)
+- [Legacy architecture](project_architecture.md) — old 3-layer (Tampermonkey + GAS + PowerShell), being phased out
+- [Narrative is source of truth](feedback_narrative_truth.md) — assumption mismatches resolve to narrative layer values
+- [Avoid OAuth login flows](feedback_no_oauth_login.md) — Google/Yahoo OAuth is blocked by automation detection in Playwright
+- [MF headless detection workaround](feedback_mf_headless_detection.md) — UA偽装 + navigator.webdriver 隠しでヘッドレス運用が通る
+- [Narrative project location](reference_narrative_project.md) — narrative layer lives in separate Claude project "資産運用計画"

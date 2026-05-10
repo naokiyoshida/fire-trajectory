@@ -1,0 +1,46 @@
+# CSS selectors for the transactions page (https://moneyforward.com/cf).
+# Each key holds a list of fallback selectors. The extractor tries them in
+# order and uses the first one that matches.
+
+table:
+  - "#cf-detail-table tbody"
+  - "#transaction_list_body"
+  - ".js-transaction_table tbody"
+
+row:
+  - "tr"
+
+cell:
+  date:
+    - ".date"
+  content:
+    - ".content"
+  amount:
+    - ".amount"
+  source:
+    - ".qt-financial_institution"
+  category_large:
+    - ".qt-large_category"
+  category_middle:
+    - ".qt-middle_category"
+
+flags:
+  is_transfer:
+    classes: ["is-transfer"]
+    text_marker: "(振替)"
+  is_excluded:
+    classes: ["is-calculation-excluded"]
+    children: [".icon-ban-circle"]
+
+navigation:
+  prev_month:
+    - "button.fc-button-prev"
+    - ".fc-button-prev"
+    - "#menu_range_prev"
+    - ".previous_month a"
+  today:
+    - "button.fc-button-today"
+    - ".fc-today-button"
+  header_title:
+    - ".fc-header-title"
+    - ".transaction-range-display"

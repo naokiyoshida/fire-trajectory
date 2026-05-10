@@ -1,5 +1,6 @@
-src/fire-config.js
-src/fire-config.sample.js
-src/mf_sync_client.user.js
-**/*.md
-.git/**
+# clasp は GAS スクリプトのみを Apps Script プロジェクトに push する。
+# Node 側のソース・テスト・設定は全て除外し、appsscript.json と src/*.gs のみ許可する。
+
+**
+!appsscript.json
+!src/**.gs

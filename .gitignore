@@ -1,16 +1,28 @@
-# --- fire-trajectory Secret ---
-# GASのURLを含む設定ファイルを除外
-src/fire-config.js
-
-# 設定の雛形は共有対象に含める
-!src/fire-config.js.sample
-
-# clasp secret
+# --- clasp secret ---
 .clasp.json
+
+# --- Claude Code local settings ---
+.claude/
+
+# --- Node.js / TypeScript ---
+node_modules/
+dist/
+*.tsbuildinfo
+
+# --- Secrets & Auth ---
+.env
+.env.local
+config/google-service-account.json
+data/storage-state.json
+
+# --- Runtime data ---
+data/snapshots/
+*.log
+run_log.txt
 
 # --- System & Temporary Files ---
 *.csv
 .DS_Store
 Thumbs.db
 .vscode/
-.idea/run_log.txt
+.idea/

@@ -1,0 +1,39 @@
+# CSS selectors for マネフォME 資産・負債ページ
+# /bs/portfolio (assets) と /bs/liability (liabilities) は構造が共通:
+#   - div.heading-radius-box に「総額：XX,XXX円」
+#   - 最初の table.table-bordered が「内訳サマリー」テーブル
+#       行: tbody tr, カテゴリ名: th a, 金額: 1番目のtd, 比率: 2番目のtd
+
+total_box:
+  - "div.heading-radius-box"
+
+summary_table:
+  - "table.table.table-bordered"
+
+summary_row: "tbody tr"
+summary_label: "th a"
+summary_amount: "td"  # 最初のtd（金額）, 2番目のtd は比率
+
+# カテゴリラベル → 内部フィールド名 のマッピング
+# 表記ゆれ（全角/半角カッコ）も拾えるよう複数キーを許容
+asset_categories:
+  "預金・現金・暗号資産": cash
+  "株式（現物）": stocks_listed
+  "株式(現物)": stocks_listed
+  "投資信託": funds
+  "年金": pension
+  "ポイント・マイル": points
+  # 出てくる可能性のある未対応カテゴリは other_assets に集約
+  "債券": other_assets
+  "保険": other_assets
+  "不動産": other_assets
+  "その他の資産": other_assets
+
+liability_categories:
+  "クレジットカード利用残高": credit_card
+  "住宅ローン": mortgage
+  "自動車ローン": other_loans
+  "キャッシング・カードローン": other_loans
+  "奨学金": other_loans
+  "その他の負債": other_loans
+  "その他": other_loans

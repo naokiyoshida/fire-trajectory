@@ -1,0 +1,41 @@
+{
+  "name": "fire-trajectory",
+  "version": "0.2.0",
+  "private": true,
+  "description": "Money Forward ME 月次スナップショット → Google Sheets → FIRE シミュレーション",
+  "type": "module",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "build": "tsc",
+    "lint": "tsc --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "dev": "tsx app/cli.ts",
+    "sync": "tsx app/cli.ts sync",
+    "sync:dry": "tsx app/cli.ts sync --dry-run",
+    "sync:full": "tsx app/cli.ts sync --full",
+    "sync:full:dry": "tsx app/cli.ts sync --full --dry-run",
+    "sync-assets:dry": "tsx app/cli.ts sync-assets --dry-run",
+    "login": "tsx app/cli.ts login",
+    "check-session": "tsx app/cli.ts check-session",
+    "health-check": "tsx app/cli.ts health-check",
+    "playwright:install": "playwright install chromium"
+  },
+  "dependencies": {
+    "dotenv": "^16.4.5",
+    "googleapis": "^144.0.0",
+    "nodemailer": "^8.0.7",
+    "playwright": "^1.49.0",
+    "yaml": "^2.6.1",
+    "zod": "^3.23.8"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.0",
+    "@types/nodemailer": "^8.0.0",
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.2",
+    "vitest": "^2.1.8"
+  }
+}

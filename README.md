@@ -1,69 +1,87 @@
 # fire-trajectory (自由への軌道)
 
-Money Forward ME の資産データを自動収集・蓄積し、FIRE (Financial Independence, Retire Early) 達成に向けた軌跡を可視化・シミュレーションするためのシステムです。
+Money Forward ME の取引明細と資産スナップショットを月次で自動収集し、Google Sheets に蓄積して FIRE (Financial Independence, Retire Early) 計画の意思決定材料を最新に保つためのシステムです。
 
-## プロジェクト構成
+## 構成
 
-本システムは、クライアントサイド（データ収集）とサーバーサイド（データ蓄積・分析）の2層構造で動作します。
-
-```text
-[User / Task Scheduler] 
-       |
-       v
-[ PC / Chrome ] 
-  - RunSyncHidden.ps1 (起動ランチャー)
-  - mf_sync_client.user.js (Tampermonkeyスクリプト)
-       |
-       | (HTTPS/POST: JSON)
-       v
-[ Google Cloud / GAS ]
-  - gas_receiver_service.gs (Web API / Logic)
-       |
-       v
-[ Google Sheets ]
-  - Database (蓄積データ)
-  - Dashboard (シミュレーション設定)
-  - Simulation (将来予測・資産推移グラフ)
+```
+[Windows タスクスケジューラ]
+   │ 月1回 起動
+   ▼
+[Node.js + Playwright]                       (app/, scripts/)
+   ├ マネフォME に自動ログイン (Cookie永続化)
+   ├ /cf から過去Nヶ月の取引履歴をスクレイプ
+   ├ /bs/portfolio と /bs/liability から資産・負債のスナップショット
+   ├ Google Sheets API で書き込み
+   └ 失敗時は Gmail で通知
+   │
+   ▼
+[Google Sheets] - 数値層
+   ├ Database          (取引明細、Node が書き込み)
+   ├ Assets_Monthly    (月次の資産スナップショット、Node が書き込み)
+   ├ Manual_Assets     (インテグレ等の手動入力、ユーザーが管理)
+   ├ Dashboard         (シミュレーション入力、GAS が初期化)
+   ├ Simulation        (FIRE 月次予測、GAS が構築)
+   └ Report_*          (集計レポート、GAS が QUERY で構築)
+   │
+   ▼
+[Claude プロジェクト「資産運用計画」] - ナラティブ層
+   Drive コネクタ経由で上記 Sheets を参照し、目標年齢・前提条件・戦略を議論
 ```
 
 ## 主要コンポーネント
 
-| コンポーネント | ファイル名 | 役割 |
+| 階層 | パス | 役割 |
 |---|---|---|
-| **Sync Client** | `mf_sync_client.user.js` | Money Forward ME の画面からデータをスクレイピングし、GASへ送信します。SPA遷移検知、自動ページめくり、重複排除機能を搭載。 |
-| **Launcher** | `RunSyncHidden.ps1` | タスクスケジューラからChromeをバックグラウンドで起動するためのPowerShellスクリプト。 |
-| **Receiver & Logic** | `gas_receiver_service.gs` | データ受信、スプレッドシートへの蓄積、およびシミュレーション環境の自動構築を行います。 |
-| **Documentation** | `FUNCTIONAL_SPEC.md` | システムの詳細な計算論理、通信仕様、データ構造を定義。 |
-| **Guide** | `DEPLOY_GUIDE.md` | 開発環境のセットアップおよびデプロイ手順を解説。 |
+| エントリポイント | `app/cli.ts` | CLI コマンド (`sync` / `login` / `check-session` / `snapshot`) |
+| 取引スクレイパ | `app/scrapers/transactions/` | navigator / extractor / selectors / schema / transformer |
+| 資産スクレイパ | `app/scrapers/assets/` | 同上の構成、`/bs/portfolio` と `/bs/liability` を扱う |
+| パイプライン | `app/pipeline/sync-transactions.ts`, `app/pipeline/sync-assets.ts` | スクレイプ → 検証 → Sheets 書き込みの統括 |
+| 共通コア | `app/core/` | browser (Playwright), sheets-client (Sheets API), notifier (Gmail SMTP), config (zod), logger, errors |
+| 認証 | `app/auth/` | 初回ログインフローと storageState 管理 |
+| GAS | `src/gas_receiver_service.gs` | Dashboard / Simulation / Report_* シートの構築 (`setupSimulation`, `setupReports`) |
+| ランチャ | `scripts/run-sync.ps1` | Windows タスクスケジューラ用 |
+| テスト | `tests/` | vitest による純関数テスト (28本) |
 
-## 主要機能
+## 設計原則
 
-### 1. Robust Adaptive Sync (堅牢な適応型同期)
+- **階層分離**: スクレイピングは navigator / extractor / schema / transformer / sink の5層に分け、サイト変更の影響範囲を狭める
+- **セレクタ外出し**: CSS セレクタは `selectors.yml` で管理し、コード変更なしで追従できる
+- **検証ファースト**: zod スキーマで取得データを検証し、内訳合計と総額の整合性も refine でチェック
+- **冪等性**: 当月分の資産スナップショットが既にあれば書き込みをスキップ、取引はハッシュID で重複排除
+- **ヘッドレスでも通る**: User-Agent 偽装と `navigator.webdriver` 隠しでマネフォME のヘッドレス検出を回避
 
-- **期間自動調整**: データの蓄積状況に応じて同期範囲（全期間 or 直近6ヶ月）を自動で切り替えます。
-- **日付不一致耐性**: 画面上の日付を正として同期を継続し、リロードループを回避します。
-- **SPA対応**: 画面遷移を監視し、年月カウンターと正確に同期させます。
+## クイックスタート
 
-### 2. Simulation & Visualization (資産寿命予測)
+セットアップ手順は [DEPLOY_GUIDE.md](DEPLOY_GUIDE.md) を参照してください。
 
-- **自動セットアップ**: `setupSimulation` 関数により、シミュレーション用シートとグラフを自動生成。
-- **実質利回り計算**: フィッシャー方程式に基づき、インフレ率を考慮した実質的な資産成長を予測。
-- **ライフイベント制御**: ローン完済、配偶者の退職、年金受給開始などの収支変化を動的に反映。
+```powershell
+# 依存インストール
+npm install
+npx playwright install chromium
 
-### 3. Stealth Automation (ステルス自動実行)
+# 初回ログイン (ヘッドフルでブラウザが開く、メアド + 2FA 入力)
+npm run login
 
-- **タスクスケジューラ連携**: `RunSyncHidden.ps1` により、作業を妨げない完全バックグラウンド実行を実現。
-- **Sandbox Bypass**: 同期完了後、ブラウザタブを自動的に閉じます。
+# セッション確認
+npm run check-session
+
+# Sheets 書き込みなしのドライラン
+npm run sync:dry
+
+# 本番同期 (.env 設定後)
+npm run sync
+```
 
 ## ドキュメント
 
-- [機能仕様書](FUNCTIONAL_SPEC.md): 計算ロジックやデータ定義の詳細。
-- [デプロイガイド](DEPLOY_GUIDE.md): セットアップとデプロイの手順。
+- [機能仕様書](FUNCTIONAL_SPEC.md): アーキテクチャ、データモデル、計算ロジック
+- [デプロイガイド](DEPLOY_GUIDE.md): セットアップ、Google Cloud、タスクスケジューラ登録
 
-## ライセンス (License)
+## ライセンス
 
-本ソフトウェアは [MIT License](LICENSE) の下で公開されています。
+[MIT License](LICENSE)
 
-## 免責事項 (Disclaimer)
+## 免責事項
 
-本ツールはMoney Forward ME の公式ツールではありません。利用規約を遵守し、自己責任でご利用ください。
+本ツールは Money Forward ME の公式ツールではありません。利用規約を遵守し、自己責任でご利用ください。スクレイピングの頻度は月次に絞り、過剰なアクセスは避ける設計になっています。
