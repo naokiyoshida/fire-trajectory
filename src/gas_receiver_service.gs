@@ -52,6 +52,7 @@ function onOpen() {
 
 // ===== 表示色（編集可能セルとデフォルト値の視覚区別） =====
 const COLOR_EDITABLE = '#fff3cd';   // ユーザーが編集してよいセル（薄い黄）
+const COLOR_FORMULA  = '#e1f5fe';   // 数式が入っているセル（自動計算、編集非推奨、薄い水色）
 const COLOR_DEFAULT  = '#f3f3f3';   // 参照のみのデフォルト値・ヘッダー（薄い灰）
 const COLOR_HEADER   = '#e6f7ff';   // テーブルヘッダー（薄い青）
 
@@ -185,11 +186,18 @@ function setupSimulation() {
   // ヘッダー
   dashSheet.getRange('A1:D1').setBackground(COLOR_HEADER).setFontWeight('bold');
 
-  // 編集可能セル（B列）に黄色、デフォルト値（D列）に灰色＋斜体
+  // 編集可能セル（B列）の色分け：
+  //   - 値（数値・日付）が入っているセル → 黄色（編集してよい）
+  //   - 数式が入っているセル             → 水色（自動計算、編集非推奨）
+  // デフォルト値（D列）→ 灰色＋斜体
   const dataRows = dashboardData.length - 1;
   if (dataRows > 0) {
-    dashSheet.getRange(2, 2, dataRows, 1).setBackground(COLOR_EDITABLE);
     dashSheet.getRange(2, 4, dataRows, 1).setBackground(COLOR_DEFAULT).setFontStyle('italic');
+    for (let r = 0; r < dataRows; r++) {
+      const cell = dashSheet.getRange(r + 2, 2);
+      const isFormula = String(cell.getFormula() || '').length > 0;
+      cell.setBackground(isFormula ? COLOR_FORMULA : COLOR_EDITABLE);
+    }
   }
 
   // 行ごとに B 列・D 列のフォーマット適用
@@ -607,6 +615,7 @@ function applyFormatting() {
   console.log("【開始】applyFormatting");
   const ss = SpreadsheetApp.getActiveSpreadsheet();
 
+  applyFormattingDashboard_(ss);
   applyFormattingManualAssets_(ss);
   applyFormattingTransactions_(ss);
   applyFormattingAssets_(ss);
@@ -614,6 +623,27 @@ function applyFormatting() {
   applyFormattingReports_(ss);
 
   console.log("【完了】applyFormatting");
+}
+
+function applyFormattingDashboard_(ss) {
+  const sheet = ss.getSheetByName(SHEET.DASHBOARD);
+  if (!sheet) return;
+  const lastRow = sheet.getLastRow();
+  if (lastRow < 2) return;
+  const dataRows = lastRow - 1;
+
+  // ヘッダー
+  sheet.getRange('A1:D1').setBackground(COLOR_HEADER).setFontWeight('bold');
+
+  // D 列（デフォルト値）= 灰＋斜体
+  sheet.getRange(2, 4, dataRows, 1).setBackground(COLOR_DEFAULT).setFontStyle('italic');
+
+  // B 列：数式が入っていれば水色（編集非推奨）、それ以外は黄色（編集可）
+  for (let r = 0; r < dataRows; r++) {
+    const cell = sheet.getRange(r + 2, 2);
+    const isFormula = String(cell.getFormula() || '').length > 0;
+    cell.setBackground(isFormula ? COLOR_FORMULA : COLOR_EDITABLE);
+  }
 }
 
 function applyFormattingManualAssets_(ss) {
