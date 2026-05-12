@@ -330,7 +330,7 @@ function setupSimulation() {
   }
 
   try {
-    createTrajectoryChart(simSheet);
+    createTrajectoryChart(simSheet, userBdayDate);
   } catch (e) {
     console.warn("createTrajectoryChart failed (continuing without chart): " + e);
   }
@@ -345,7 +345,7 @@ function setupSimulation() {
   console.log("【完了】setupSimulation");
 }
 
-function createTrajectoryChart(sheet) {
+function createTrajectoryChart(sheet, userBday) {
   const lastRow = sheet.getLastRow();
   if (lastRow < 2) return;
 
@@ -354,13 +354,44 @@ function createTrajectoryChart(sheet) {
     sheet.removeChart(c);
   }
 
+  // x軸: 5歳刻みで「2027年 (50歳)」のようなカスタム目盛りを生成する。
+  // 妻と本人は学年が同じなので本人年齢を併記対象とする（妻はほぼ同年）。
+  let hAxisOption = { title: '年月' };
+  try {
+    if (userBday && !isNaN(userBday.getTime())) {
+      const firstDate = sheet.getRange(2, 1).getValue();
+      const lastDate = sheet.getRange(lastRow, 1).getValue();
+      if (firstDate instanceof Date && lastDate instanceof Date) {
+        const interval = 5;
+        const firstAge = firstDate.getFullYear() - userBday.getFullYear();
+        const lastAge = lastDate.getFullYear() - userBday.getFullYear() + 1;
+        const startAge = Math.ceil(firstAge / interval) * interval;
+        const ticks = [];
+        for (let age = startAge; age <= lastAge; age += interval) {
+          const tickDate = new Date(
+            userBday.getFullYear() + age,
+            userBday.getMonth(),
+            userBday.getDate()
+          );
+          if (tickDate < firstDate || tickDate > lastDate) continue;
+          ticks.push({ v: tickDate, f: tickDate.getFullYear() + '年 (' + age + '歳)' });
+        }
+        if (ticks.length > 0) {
+          hAxisOption = { title: '年 / 本人年齢', ticks: ticks };
+        }
+      }
+    }
+  } catch (e) {
+    console.warn('Custom hAxis ticks failed, falling back: ' + e);
+  }
+
   const chart = sheet.newChart()
     .setChartType(Charts.ChartType.AREA)
     .addRange(sheet.getRange(1, 1, lastRow, 1))
     .addRange(sheet.getRange(1, 8, lastRow, 1))
     .setPosition(2, 10, 0, 0)
     .setOption('title', '資産推移シミュレーション')
-    .setOption('hAxis', { title: '年月' })
+    .setOption('hAxis', hAxisOption)
     .setOption('vAxis', { title: '資産額 (円)' })
     .setOption('width', 900)
     .setOption('height', 500)
