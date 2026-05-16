@@ -1,6 +1,11 @@
 #!/usr/bin/env node
 import { config as loadDotenv } from "dotenv";
 import { logger } from "./core/logger.js";
+import {
+  evaluateHealth,
+  readSyncStatus,
+  writeSyncStatus,
+} from "./core/sync-status.js";
 
 loadDotenv();
 
@@ -21,6 +26,14 @@ async function main(): Promise<void> {
       logger.info(
         `syncAssets: scraped=${assets.scraped}, appended=${assets.appended}, skipped=${assets.skipped}${assets.reason ? ` (${assets.reason})` : ""}`,
       );
+      if (!dryRun) {
+        writeSyncStatus({
+          ok: true,
+          ts: new Date().toISOString(),
+          command: "sync",
+          appended: tx.appended,
+        });
+      }
       break;
     }
     case "sync-transactions": {
@@ -31,6 +44,14 @@ async function main(): Promise<void> {
       logger.info(
         `syncTransactions done: scraped=${result.scraped}, unique=${result.unique}, appended=${result.appended}, months=${result.monthsScanned}, fullMode=${result.fullMode}`,
       );
+      if (!dryRun) {
+        writeSyncStatus({
+          ok: true,
+          ts: new Date().toISOString(),
+          command: "sync-transactions",
+          appended: result.appended,
+        });
+      }
       break;
     }
     case "sync-assets": {
@@ -64,7 +85,13 @@ async function main(): Promise<void> {
       break;
     }
     case "health-check": {
-      logger.info("health-check: not implemented yet");
+      const verdict = evaluateHealth(readSyncStatus(), new Date());
+      if (verdict.healthy) {
+        logger.info(`health-check: ${verdict.message}`);
+      } else {
+        logger.error(`health-check FAILED: ${verdict.message}`);
+        process.exit(verdict.code);
+      }
       break;
     }
     case "snapshot-assets": {
@@ -97,6 +124,26 @@ async function main(): Promise<void> {
 main().catch(async (err: unknown) => {
   const stack = err instanceof Error ? err.stack : undefined;
   logger.error("Fatal error", { error: String(err), stack });
+
+  // sync 系の失敗は health-check が拾えるよう状態ファイルに記録する
+  if (
+    command === "sync" ||
+    command === "sync-transactions" ||
+    command === "sync-assets"
+  ) {
+    try {
+      writeSyncStatus({
+        ok: false,
+        ts: new Date().toISOString(),
+        command,
+        error: String(err),
+      });
+    } catch (statusErr: unknown) {
+      logger.error("Failed to persist sync status", {
+        error: String(statusErr),
+      });
+    }
+  }
 
   // Best-effort email notification
   try {

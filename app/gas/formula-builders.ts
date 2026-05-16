@@ -64,12 +64,27 @@ export function fireNeedFormula(args: {
   targetAgeRef: string; // dashLookup(...)
   nextReq: string; // 末尾は目標残額ref、それ以外は "I{rowIdx+1}" を含む式
   yieldCol: string; // 例 "G"
-  niExpr: string; // 年金合計式（カッコ込み）
-  expenseCol: string; // 例 "E"
+  niExpr: string; // 年金合計式（実質割戻し済み、カッコ込み）
+  expenseExpr: string; // 実質割戻し済みの支出項（例: "(E5/(1+INF)^(5/12))"）
 }): string {
-  const { rowIdx, ageCol, targetAgeRef, nextReq, yieldCol, niExpr, expenseCol } =
+  const { rowIdx, ageCol, targetAgeRef, nextReq, yieldCol, niExpr, expenseExpr } =
     args;
-  return `=IF(${ageCol}${rowIdx} > ${targetAgeRef}, "", (${nextReq})/(1+${yieldCol}${rowIdx}) - ${niExpr} + ${expenseCol}${rowIdx})`;
+  return `=IF(${ageCol}${rowIdx} > ${targetAgeRef}, "", (${nextReq})/(1+${yieldCol}${rowIdx}) - ${niExpr} + ${expenseExpr})`;
+}
+
+/**
+ * I列逆算の「数値版」。GAS の fireNeed セル数式と同一の算術を行う純粋関数で、
+ * 符号ミス・係数ミス・割り算の分母誤りを数値で回帰検出するために使う。
+ *   I(r) = nextReq/(1+月次実質利回り) − 年金(r) + 実質支出(r)
+ */
+export function fireNeedValue(args: {
+  nextReq: number;
+  monthlyRealYield: number;
+  pensionReal: number;
+  expenseReal: number;
+}): number {
+  const { nextReq, monthlyRealYield, pensionReal, expenseReal } = args;
+  return nextReq / (1 + monthlyRealYield) - pensionReal + expenseReal;
 }
 
 /**

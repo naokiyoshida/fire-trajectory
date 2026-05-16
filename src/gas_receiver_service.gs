@@ -55,7 +55,38 @@ function onOpen() {
     .addItem('シミュレーションの再構築', 'setupSimulation')
     .addItem('レポートの再構築', 'setupReports')
     .addItem('表示形式の適用', 'applyFormatting')
+    .addSeparator()
+    .addItem('月次トリガーの設定（初回のみ）', 'setupMonthlyTrigger')
     .addToUi();
+}
+
+/**
+ * 毎月2日 7時(JST)に setupReports を自動実行する time-based トリガーを1回だけ登録する。
+ * Node 側の月次同期（タスクスケジューラ、通常1日）が書き込んだ後に
+ * 集計シートを自動再構築するための「最後の1マイル」。
+ * 既存の同名トリガーは重複登録を避けるため作り直す。setupReports は冪等。
+ */
+function setupMonthlyTrigger() {
+  const fn = 'setupReports';
+  const triggers = ScriptApp.getProjectTriggers();
+  for (let i = 0; i < triggers.length; i++) {
+    if (triggers[i].getHandlerFunction() === fn) {
+      ScriptApp.deleteTrigger(triggers[i]);
+    }
+  }
+  ScriptApp.newTrigger(fn)
+    .timeBased()
+    .onMonthDay(2)
+    .atHour(7)
+    .create();
+  try {
+    SpreadsheetApp.getActive().toast(
+      '月次トリガーを設定しました（毎月2日 7時に「レポートの再構築」を自動実行）',
+      'Fire Trajectory', 5
+    );
+  } catch (e) {
+    console.log('月次トリガー設定完了（toast 失敗: ' + e + '）');
+  }
 }
 
 // ===== 表示色（編集可能セルとデフォルト値の視覚区別） =====
@@ -169,6 +200,7 @@ function setupSimulation() {
     { key: 'ローン完済予定日',          def: '2042/03/31', desc: 'この日まで「ローン月額」を支出に加算。例: 2042/03/31', fmt: 'date' },
     { key: '息子支援月額',              def: 50000,     desc: '教育費・養育費・仕送り等。例: 50000', fmt: 'yen' },
     { key: '息子支援終了日',            def: '2028/03/31', desc: 'この日まで「息子支援月額」を支出に加算。例: 2028/03/31', fmt: 'date' },
+    { key: '退職後社会保険料_月額',     def: 50000,     desc: 'リタイア予定日以降に加算する国民健康保険・介護保険料の月額目安（就労時は手取り入金額に内包のため0扱い）。保険料通知後に実額へ更新。例: 50000', fmt: 'yen' },
     { key: '運用利回り_名目',           def: 0.05,      desc: '年率（名目）。例: 0.05 = 5%（目安 3〜6%）', fmt: 'pct' },
     { key: 'インフレ率',                def: 0.02,      desc: '年率。例: 0.02 = 2%（日銀目標2% / 直近CPI 2.7〜3.2%。0 は非現実的）', fmt: 'pct' },
     { key: 'FIRE射程_盤石閾値',         def: 30000000,  desc: '終了年齢時点の予想資産がこの額超で「◎◎◎ 盤石」。例: 30000000', fmt: 'yen' },
@@ -351,6 +383,7 @@ function setupSimulation() {
     BasicExpense:          L('基本生活費_月額'),
     LoanAmount:            L('ローン月額'),
     SonAmount:             L('息子支援月額'),
+    PostRetireInsurance:   L('退職後社会保険料_月額'),
     UserMonthlyHH:         L('本人月収_家計入金'),
     UserBonusHH:           L('本人ボーナス_年額_家計入金'),
     SpouseMonthlyHH:       L('配偶者月収_家計入金'),
@@ -403,8 +436,10 @@ function setupSimulation() {
     const expBasic = `${D.BasicExpense}`;
     const expLoan = `IF(${dateRef} <= ${D.GtLoanDate}, ${D.LoanAmount}, 0)`;
     const expSon = `IF(${dateRef} <= ${D.GtSonDate}, ${D.SonAmount}, 0)`;
+    // リタイア予定日以降は就労時の社会保険控除が消えるため、国保・介護保険料を加算。
+    const expInsurance = `IF(${dateRef} >= ${D.RetireDate}, ${D.PostRetireInsurance}, 0)`;
 
-    const expense = `=${expBasic} + ${expLoan} + ${expSon}`;
+    const expense = `=${expBasic} + ${expLoan} + ${expSon} + ${expInsurance}`;
 
     const monthlyRealYield = `=((1+${D.NominalYield})/(1+${D.Inflation}))^(1/12) - 1`;
 
@@ -422,7 +457,9 @@ function setupSimulation() {
     const nextReq = isLastRow
       ? `${D.FireTargetResidual}`
       : `IF(OR(NOT(ISNUMBER(B${rowIdx + 1})), B${rowIdx + 1} > ${D.FireTargetAge}), ${D.FireTargetResidual}, I${rowIdx + 1})`;
-    const fireNeed = `=IF(B${rowIdx} > ${D.FireTargetAge}, "", (${nextReq})/(1+G${rowIdx}) - ${niFire} + E${rowIdx})`;
+    // 支出 E列は名目固定なので、実質モデルに合わせ realDeflator で割り戻して計上
+    // （年金 niFire は実質割戻し済み。実質−実質で単位を揃える）。
+    const fireNeed = `=IF(B${rowIdx} > ${D.FireTargetAge}, "", (${nextReq})/(1+G${rowIdx}) - ${niFire} + (E${rowIdx}/${realDeflator}))`;
 
     rows.push([
       aColVal,

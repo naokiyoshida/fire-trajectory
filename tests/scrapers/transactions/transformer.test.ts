@@ -24,10 +24,21 @@ describe("transactions/transformer", () => {
     expect(hashTransactionId(sample)).toBe(hashTransactionId({ ...sample }));
   });
 
-  it("hashTransactionId differs when any field changes", () => {
+  it("hashTransactionId is unchanged when only category changes", () => {
+    // Money Forward ME はカテゴリを後から編集できる。category をハッシュに
+    // 含めると、カテゴリ修正のたびに別IDになり同一取引が二重追記される。
+    // → category 変更では ID が変わらないことを契約として固定する。
     const a = hashTransactionId(sample);
-    const b = hashTransactionId({ ...sample, amount: "-501" });
-    expect(a).not.toBe(b);
+    const b = hashTransactionId({ ...sample, category: "趣味・娯楽/書籍" });
+    expect(a).toBe(b);
+  });
+
+  it("hashTransactionId differs when a hash-relevant field changes", () => {
+    const a = hashTransactionId(sample);
+    expect(hashTransactionId({ ...sample, amount: "-501" })).not.toBe(a);
+    expect(hashTransactionId({ ...sample, date: "2026/05/02" })).not.toBe(a);
+    expect(hashTransactionId({ ...sample, content: "スーパー" })).not.toBe(a);
+    expect(hashTransactionId({ ...sample, source: "楽天カード" })).not.toBe(a);
   });
 
   it("toTransaction attaches the id", () => {

@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   dashLookup,
   fireNeedFormula,
+  fireNeedValue,
   LEGACY_DISCARDED_DASHBOARD_KEYS,
   lumpIncomeFormula,
   pensionIncomeFormula,
@@ -54,7 +55,7 @@ describe("formula-builders (canonical spec)", () => {
     ).toBe('IF(TEXT($A5,"yyyyMM")=TEXT(RD,"yyyyMM"), LUMP/DEF, 0)');
   });
 
-  it("fireNeedFormula builds the backward-recursion cell", () => {
+  it("fireNeedFormula builds the backward-recursion cell (real-deflated expense)", () => {
     expect(
       fireNeedFormula({
         rowIdx: 5,
@@ -63,9 +64,52 @@ describe("formula-builders (canonical spec)", () => {
         nextReq: "NR",
         yieldCol: "G",
         niExpr: "(NI)",
-        expenseCol: "E",
+        expenseExpr: "(E5/RD)",
       }),
-    ).toBe('=IF(B5 > TGT, "", (NR)/(1+G5) - (NI) + E5)');
+    ).toBe('=IF(B5 > TGT, "", (NR)/(1+G5) - (NI) + (E5/RD))');
+  });
+
+  it("fireNeedValue matches the hand-computed backward recursion", () => {
+    // 年金=月10万、実質支出=月30万、月次実質利回り0.5%
+    // 末尾月: 0/1.005 - 100000 + 300000 = 200000
+    const last = fireNeedValue({
+      nextReq: 0,
+      monthlyRealYield: 0.005,
+      pensionReal: 100000,
+      expenseReal: 300000,
+    });
+    expect(last).toBeCloseTo(200000, 6);
+    // 1つ前の月: 200000/1.005 - 100000 + 300000 ≈ 399004.9751
+    const prev = fireNeedValue({
+      nextReq: last,
+      monthlyRealYield: 0.005,
+      pensionReal: 100000,
+      expenseReal: 300000,
+    });
+    expect(prev).toBeCloseTo(399004.97512, 4);
+  });
+
+  it("fireNeedValue: より多い年金は必要資産を下げ、より多い支出は上げる（符号の番人）", () => {
+    const base = fireNeedValue({
+      nextReq: 1_000_000,
+      monthlyRealYield: 0.004,
+      pensionReal: 120_000,
+      expenseReal: 280_000,
+    });
+    const morePension = fireNeedValue({
+      nextReq: 1_000_000,
+      monthlyRealYield: 0.004,
+      pensionReal: 200_000,
+      expenseReal: 280_000,
+    });
+    const moreExpense = fireNeedValue({
+      nextReq: 1_000_000,
+      monthlyRealYield: 0.004,
+      pensionReal: 120_000,
+      expenseReal: 360_000,
+    });
+    expect(morePension).toBeLessThan(base);
+    expect(moreExpense).toBeGreaterThan(base);
   });
 });
 
@@ -99,9 +143,9 @@ describe("gas_receiver_service.gs ↔ formula-builders contract", () => {
     );
   });
 
-  it("fireNeed cell template matches fireNeedFormula()", () => {
+  it("fireNeed cell template matches fireNeedFormula() with real-deflated expense", () => {
     expect(GAS_SRC).toContain(
-      'const fireNeed = `=IF(B${rowIdx} > ${D.FireTargetAge}, "", (${nextReq})/(1+G${rowIdx}) - ${niFire} + E${rowIdx})`;',
+      'const fireNeed = `=IF(B${rowIdx} > ${D.FireTargetAge}, "", (${nextReq})/(1+G${rowIdx}) - ${niFire} + (E${rowIdx}/${realDeflator}))`;',
     );
   });
 

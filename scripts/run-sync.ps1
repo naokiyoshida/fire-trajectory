@@ -91,9 +91,26 @@ try {
     $output | ForEach-Object { Add-Content -Path $LogFile -Value $_ }
     Write-LogLine "npm run sync exited with code $exitCode"
 
-    # セッション失効時は Task Scheduler の「前回の実行結果」で失敗が見えるよう非0で終了
+    # 3) ヘルスチェック。logs/last-sync-status.json の鮮度・追記件数を検証し、
+    #    「成功扱いだが実は古い／何も取れていない」状態を無人実行で検知する。
+    $hcOut = & $NpmPath run -s health-check 2>&1
+    $hcCode = $LASTEXITCODE
+    $hcOut | ForEach-Object { Add-Content -Path $LogFile -Value $_ }
+    Write-LogLine "health-check exited with code $hcCode"
+    if ($hcCode -ne 0) {
+        try {
+            & $NpmPath run -s dev -- notify "ヘルスチェック異常: 月次同期の健全性に問題" "run-sync.ps1: health-check が code $hcCode を返しました。$ProjectDir の logs/last-sync-status.json と当日ログを確認してください。" 2>&1 |
+                ForEach-Object { Add-Content -Path $LogFile -Value $_ }
+        } catch {
+            Write-LogLine "notify 呼び出しに失敗: $_"
+        }
+    }
+
+    # Task Scheduler の「前回の実行結果」に失敗を見せるための終了コード。
+    # 優先度: セッション失効(2) > sync 失敗 > health-check 失敗。
     if ($sessionExpired) { exit 2 }
-    exit $exitCode
+    if ($exitCode -ne 0) { exit $exitCode }
+    exit $hcCode
 }
 catch {
     Write-LogLine "Exception: $_"
