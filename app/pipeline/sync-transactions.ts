@@ -15,8 +15,12 @@ import {
   decrementMonth,
   navigateToMonth,
 } from "../scrapers/transactions/navigator.js";
-import { TransactionSchema, type Transaction } from "../scrapers/transactions/schema.js";
-import { dedupeById, toTransaction } from "../scrapers/transactions/transformer.js";
+import {
+  TransactionSchema,
+  type RawTransaction,
+  type Transaction,
+} from "../scrapers/transactions/schema.js";
+import { dedupeById, toTransactions } from "../scrapers/transactions/transformer.js";
 
 export const DATABASE_SHEET_NAME = "取引履歴";
 export const DATABASE_HEADERS = [
@@ -114,7 +118,9 @@ export async function syncTransactions(
     headless,
   });
 
-  const all: Transaction[] = [];
+  // occurrence は自然キーごとに「取得した順」で採番する必要があるため、
+  // 月をまたいで全 raw を取得し終えてから一括で ID を付与する。
+  const allRaws: RawTransaction[] = [];
   const today = new Date();
   let year = today.getFullYear();
   let month = today.getMonth() + 1;
@@ -128,21 +134,8 @@ export async function syncTransactions(
 
     for (let i = 0; i < monthsToSync; i++) {
       const raws = await extractTransactions(browser.page, year, month);
-      const txs: Transaction[] = [];
-      for (const raw of raws) {
-        const tx = toTransaction(raw);
-        const validated = TransactionSchema.safeParse(tx);
-        if (validated.success) {
-          txs.push(validated.data);
-        } else {
-          logger.warn("Dropping transaction failing schema validation", {
-            tx,
-            issues: validated.error.issues.map((iss) => `${iss.path.join(".")}: ${iss.message}`),
-          });
-        }
-      }
-      logger.info(`Month ${year}/${month}: ${txs.length} valid transactions`);
-      all.push(...txs);
+      logger.info(`Month ${year}/${month}: ${raws.length} transactions`);
+      allRaws.push(...raws);
 
       if (i < monthsToSync - 1) {
         const next = decrementMonth(year, month);
@@ -153,6 +146,23 @@ export async function syncTransactions(
     }
   } finally {
     await browser.close();
+  }
+
+  // 自然キー内の出現順で occurrence を採番して ID を確定（同日・同額・同口座の
+  // 別取引も別IDになり保持される）。その後スキーマ検証で異常行を落とす。
+  const all: Transaction[] = [];
+  for (const tx of toTransactions(allRaws)) {
+    const validated = TransactionSchema.safeParse(tx);
+    if (validated.success) {
+      all.push(validated.data);
+    } else {
+      logger.warn("Dropping transaction failing schema validation", {
+        tx,
+        issues: validated.error.issues.map(
+          (iss) => `${iss.path.join(".")}: ${iss.message}`,
+        ),
+      });
+    }
   }
 
   // この家計で全走査月の取引が 0 件になることは実質ありえない。
