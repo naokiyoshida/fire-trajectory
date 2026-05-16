@@ -1,5 +1,6 @@
 import { launchBrowser } from "../core/browser.js";
 import { loadConfig, requireSheetsConfig } from "../core/config.js";
+import { ScrapingError } from "../core/errors.js";
 import { logger } from "../core/logger.js";
 import {
   appendRows,
@@ -152,6 +153,18 @@ export async function syncTransactions(
     }
   } finally {
     await browser.close();
+  }
+
+  // この家計で全走査月の取引が 0 件になることは実質ありえない。
+  // セッション失効（/sign_in リダイレクト）や DOM 変更を「正常終了」として
+  // ゼロ書き込みのまま月を閉じないよう、ここで明示的に失敗させて通知経路に乗せる。
+  if (all.length === 0) {
+    throw new ScrapingError(
+      `${monthsToSync}ヶ月走査したが取引が1件も取得できませんでした。` +
+        `セッション失効（要 npm run login）か Money Forward の画面変更の可能性が高いです。`,
+      "extractor",
+      { monthsToSync, fullMode },
+    );
   }
 
   const unique = dedupeById(all);

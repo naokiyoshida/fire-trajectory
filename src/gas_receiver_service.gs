@@ -182,8 +182,8 @@ function setupSimulation() {
     { key: 'リタイア予定日',            def: '2037/03/31', desc: 'この日以降、本人の月収・ボーナス家計入金を停止。例: 2037/03/31', fmt: 'date' },
     { key: '本人月収_家計入金',         def: 300000,    desc: '本人が家計に入れる月額（手取り35万のうち30万、残5万は個人）。例: 300000', fmt: 'yen' },
     { key: '本人ボーナス_年額_家計入金', def: 900000,   desc: '本人ボーナスのうち家計入金 年額（月割で平準化）。例: 900000', fmt: 'yen' },
-    { key: '本人退職時一時金',          def: 3000000,   desc: 'リタイア予定月に一度だけ加算。例: 3000000', fmt: 'yen' },
-    { key: '本人年金_年額',             def: 1800000,   desc: '本人年金 年額（ねんきん定期便で更新）。例: 1800000 = 月15万', fmt: 'yen' },
+    { key: '本人退職時一時金',          def: 3000000,   desc: 'リタイア予定月に一度だけ加算。将来名目額で入力（内部でインフレ実質割戻し）。例: 3000000', fmt: 'yen' },
+    { key: '本人年金_年額',             def: 1800000,   desc: '本人年金 年額。ねんきん定期便の将来名目額のままでOK（内部でインフレ実質割戻し）。例: 1800000 = 月15万', fmt: 'yen' },
     { key: '本人年金開始年齢',          def: 65,        desc: '例: 65（繰上 60〜64 / 標準 65 / 繰下 66〜75）', fmt: 'int' },
 
     { section: '■ 配偶者（妻）の設定' },
@@ -191,8 +191,8 @@ function setupSimulation() {
     { key: '配偶者退職予定日',          def: '2041/06/30', desc: 'この日以降、配偶者の月収・ボーナス家計入金を停止。例: 2041/06/30', fmt: 'date' },
     { key: '配偶者月収_家計入金',       def: 130000,    desc: '配偶者が家計に入れる月額（手取り20万のうち13万）。例: 130000', fmt: 'yen' },
     { key: '配偶者ボーナス_年額_家計入金', def: 0,      desc: '配偶者ボーナスのうち家計入金 年額（無ければ 0）。例: 0', fmt: 'yen' },
-    { key: '配偶者退職時一時金',        def: 0,         desc: '配偶者退職予定月に一度だけ加算（当てにせず 0、確定後更新）。例: 0', fmt: 'yen' },
-    { key: '配偶者年金_年額',           def: 780000,    desc: '配偶者年金 年額（ねんきん定期便で更新）。例: 780000 = 月6.5万', fmt: 'yen' },
+    { key: '配偶者退職時一時金',        def: 0,         desc: '配偶者退職予定月に一度だけ加算（当てにせず 0、確定後更新）。将来名目額で入力（内部で実質割戻し）。例: 0', fmt: 'yen' },
+    { key: '配偶者年金_年額',           def: 780000,    desc: '配偶者年金 年額。ねんきん定期便の将来名目額のままでOK（内部でインフレ実質割戻し）。例: 780000 = 月6.5万', fmt: 'yen' },
     { key: '配偶者年金開始年齢',        def: 65,        desc: '例: 65（本人と独立に設定可）', fmt: 'int' }
   ];
 
@@ -267,6 +267,35 @@ function setupSimulation() {
     if (f) {
       bCell.setNumberFormat(f);
       dCell.setNumberFormat(f);
+    }
+
+    // 入力規則（誤入力で全試算が壊れるのを防ぐ）。数式セル（自動計算）は対象外。
+    if (!isFormula) {
+      let rule = null;
+      if (it.fmt === 'pct') {
+        rule = SpreadsheetApp.newDataValidation()
+          .requireNumberBetween(-0.1, 1)
+          .setHelpText('年率は 0〜1 の小数で入力（例: 0.05 = 5%）。「5」と入れると500%扱いになります。デフレ考慮で -0.1 まで可。')
+          .setAllowInvalid(false).build();
+      } else if (it.fmt === 'date') {
+        rule = SpreadsheetApp.newDataValidation()
+          .requireDate()
+          .setHelpText('日付を入力（例: 2037/03/31）。文字列だと DATEDIF が壊れシミュレーション全体が崩れます。')
+          .setAllowInvalid(false).build();
+      } else if (it.fmt === 'int') {
+        rule = SpreadsheetApp.newDataValidation()
+          .requireNumberBetween(1, 200)
+          .setHelpText('1〜200 の整数（年齢）を入力。')
+          .setAllowInvalid(false).build();
+      } else if (it.fmt === 'yen') {
+        rule = SpreadsheetApp.newDataValidation()
+          .requireNumberGreaterThanOrEqualTo(0)
+          .setHelpText('0 以上の金額を半角数値で入力（¥ やカンマは不要）。')
+          .setAllowInvalid(false).build();
+      }
+      if (rule) bCell.setDataValidation(rule);
+    } else {
+      bCell.setDataValidation(null); // 旧バージョンの規則が残っていれば解除
     }
   });
 
@@ -355,14 +384,19 @@ function setupSimulation() {
     // 月次収入は「月収_家計入金 + ボーナス_家計入金_年額/12」で平準化
     const incUser = `IF(${dateRef} <= ${D.RetireDate}, ${D.UserMonthlyHH} + ${D.UserBonusHH}/12, 0)`;
     const incSpouse = `IF(${dateRef} <= ${D.GtSpouseRetire}, ${D.SpouseMonthlyHH} + ${D.SpouseBonusHH}/12, 0)`;
+    // 実質割戻し係数: 本シミュレーションは「今日の円（実質）」で計算する。
+    // 年金・退職一時金は ねんきん定期便等の「将来名目額」で入力されるため、
+    // 開始月までの経過年数ぶんインフレで割り戻して実質化する。
+    // （給与・基本生活費はインフレ連動＝実質ほぼ一定と仮定し割戻さない）
+    const realDeflator = `(1+${D.Inflation})^(${i}/12)`;
     // 年金は本人・配偶者で開始年齢を独立に設定可能（繰上/繰下に対応）
     const startUserPen = `EDATE(${D.UserBday}, 12*${D.UserPensionStartAge})`;
     const startSpousePen = `EDATE(${D.SpouseBday}, 12*${D.SpousePensionStartAge})`;
-    const incUserPen = `IF(${dateRef} >= ${startUserPen}, ${D.UserPension}/12, 0)`;
-    const incSpousePen = `IF(${dateRef} >= ${startSpousePen}, ${D.SpousePension}/12, 0)`;
-    // 退職一時金: 本人はリタイア予定月、配偶者は配偶者退職予定月にそれぞれ加算
-    const incUserLump = `IF(TEXT(${dateRef},"yyyyMM")=TEXT(${D.RetireDate},"yyyyMM"), ${D.UserRetireLump}, 0)`;
-    const incSpouseLump = `IF(TEXT(${dateRef},"yyyyMM")=TEXT(${D.GtSpouseRetire},"yyyyMM"), ${D.SpouseRetireLump}, 0)`;
+    const incUserPen = `IF(${dateRef} >= ${startUserPen}, (${D.UserPension}/12)/${realDeflator}, 0)`;
+    const incSpousePen = `IF(${dateRef} >= ${startSpousePen}, (${D.SpousePension}/12)/${realDeflator}, 0)`;
+    // 退職一時金: 本人はリタイア予定月、配偶者は配偶者退職予定月にそれぞれ加算（実質割戻し済み）
+    const incUserLump = `IF(TEXT(${dateRef},"yyyyMM")=TEXT(${D.RetireDate},"yyyyMM"), ${D.UserRetireLump}/${realDeflator}, 0)`;
+    const incSpouseLump = `IF(TEXT(${dateRef},"yyyyMM")=TEXT(${D.GtSpouseRetire},"yyyyMM"), ${D.SpouseRetireLump}/${realDeflator}, 0)`;
 
     const income = `=${incUser} + ${incSpouse} + ${incUserPen} + ${incSpousePen} + ${incUserLump} + ${incSpouseLump}`;
 
@@ -737,7 +771,35 @@ function setupReportFireReadiness_(ss) {
     '=IFERROR(INDEX(' + simRef + '!B:B, ' + fireMatch + '+1), ' + simNoData + ')'
   );
 
-  sheet.setColumnWidth(1, 260);
+  // --- 逆算アクション指標（「何をどれだけ変えれば早まるか」を数値化）---
+
+  // 現在の月次収支（実質, 収入−支出。プラス＝毎月この額を貯蓄に回せている）
+  sheet.getRange('A13').setValue('現在の月次収支（実質, 収入−支出）');
+  sheet.getRange('B13').setFormula(
+    '=IFERROR(INDEX(' + simRef + '!F:F, 2), ' + simNoData + ')'
+  );
+
+  // FIRE可能までの目安年数（今＝0年。到達しなければメッセージ）
+  sheet.getRange('A14').setValue('FIRE可能までの目安年数');
+  sheet.getRange('B14').setFormula(
+    '=IFERROR((' + fireMatch + '-1)/12, "期間内に到達せず")'
+  );
+
+  // FIRE を約1年前倒しするのに必要な「追加の月次貯蓄」目安（概算）。
+  // 1年手前の月における不足額 = FIRE必要資産(I) − 予想資産(H) を、
+  // 今からその月までの月数で割った近似。MAX(0,…) で負を丸める。
+  sheet.getRange('A15').setValue('1年前倒しに必要な月次追加貯蓄（概算）');
+  sheet.getRange('B15').setFormula(
+    '=IFERROR(IF((' + fireMatch + ')<=13, "既に約1年以内（前倒し不要）",' +
+    ' MAX(0, (INDEX(' + simRef + '!I2:I, (' + fireMatch + ')-12)' +
+    ' - INDEX(' + simRef + '!H2:H, (' + fireMatch + ')-12)) / ((' + fireMatch + ')-13))),' +
+    ' "期間内に到達せず")'
+  );
+
+  sheet.getRange('A16').setValue('※ 上記は概算。利回り/インフレ/生活費を変えた精密比較は設定値を変えて再構築');
+  sheet.getRange('A16').setFontStyle('italic');
+
+  sheet.setColumnWidth(1, 300);
   sheet.setColumnWidth(2, 200);
 }
 
@@ -789,10 +851,17 @@ function applyFormattingDashboard_(ss) {
 function applyFormattingManualAssets_(ss) {
   const sheet = ss.getSheetByName(SHEET.MANUAL_ASSETS);
   if (!sheet) return;
-  const lastRow = Math.max(sheet.getLastRow(), 2);
 
   // ヘッダー
   sheet.getRange('A1:C1').setBackground(COLOR_HEADER).setFontWeight('bold');
+
+  // 入力対象ラベルが未投入なら雛形を seed（Node 側はラベル名で読むので安全）。
+  // 既にユーザーが入力していれば（getLastRow>=2）触らない。
+  if (sheet.getLastRow() < 2) {
+    sheet.getRange('A2:A3').setValues([['未上場株式'], ['備考']]);
+  }
+
+  const lastRow = Math.max(sheet.getLastRow(), 2);
 
   // 編集可能セル：B 列（値）と C 列（備考）に黄色背景
   const dataRows = lastRow - 1;
@@ -804,6 +873,31 @@ function applyFormattingManualAssets_(ss) {
   sheet.setColumnWidth(1, 180);
   sheet.setColumnWidth(2, 160);
   sheet.setColumnWidth(3, 280);
+
+  // 「未上場株式（インテグレ等）をシートに入れるべきか」を E:H に明示。
+  // Node の loadManualAssets は A2:C しか読まないため E 以降は安全。
+  sheet.getRange('E1:H1').merge()
+    .setValue('■ 未上場株式（インテグレ等）の入れ方')
+    .setFontWeight('bold').setBackground(COLOR_HEADER);
+  const guide =
+    '未上場株式は Money Forward のポートフォリオ自動取得（/bs/portfolio）には含まれません。\n' +
+    '本ツールは「資産総額 ＝ MF取得合計 ＋ この『未上場株式』の値」として合算します。\n\n' +
+    '原則：ここ（「未上場株式」行の B列「値」）に評価額を入力してください。\n' +
+    'MF に登録していても、スクレイプ対象の資産総額には反映されないためです。\n\n' +
+    '⚠ 例外（二重計上注意）：MF 側でも未上場株式が「資産総額」に含まれて表示\n' +
+    'されている場合は、ここに入れると二重計上になります → その場合は空欄(0)に。\n\n' +
+    '確認：MF の /bs/portfolio の「資産総額」にインテグレ評価額が入っているか。\n' +
+    ' ・入っていない（連携外/未集計）→ ここに金額を入力（推奨）\n' +
+    ' ・入っている（MFが資産総額に算入済み）→ ここは空欄(0)';
+  sheet.getRange('E2:H12').merge()
+    .setValue(guide)
+    .setWrap(true).setVerticalAlignment('top').setBackground('#fffdf0');
+  sheet.getRange('A1').setNote(
+    '未上場株式（インテグレ等）の入れ方は右側 E 列の説明を参照。' +
+    '原則ここに評価額を入力（MF自動取得には含まれないため）。' +
+    'MFの資産総額に既に含まれている場合のみ空欄(0)。'
+  );
+  for (let c = 5; c <= 8; c++) sheet.setColumnWidth(c, 220);
 }
 
 function applyFormattingTransactions_(ss) {
@@ -917,11 +1011,14 @@ function applyFormattingReports_(ss) {
     }
   }
 
-  // FIRE射程：B5 日付、B6/B7/B8 円、B12 本人年齢（整数）
+  // FIRE射程：B5 日付、B6/B7/B8 円、B12 年齢、B13/B15 円、B14 年数
   const fr = ss.getSheetByName(SHEET.REPORT_FIRE);
   if (fr) {
     fr.getRange('B5').setNumberFormat(FMT_DATE);
     fr.getRange('B6:B8').setNumberFormat(FMT_YEN);
     fr.getRange('B12').setNumberFormat(FMT_INT);
+    fr.getRange('B13').setNumberFormat(FMT_YEN);
+    fr.getRange('B14').setNumberFormat('0.0"年"');
+    fr.getRange('B15').setNumberFormat(FMT_YEN);
   }
 }

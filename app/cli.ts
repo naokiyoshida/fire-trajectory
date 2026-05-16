@@ -54,6 +54,15 @@ async function main(): Promise<void> {
       if (!ok) process.exit(2);
       break;
     }
+    case "notify": {
+      // 外部（run-sync.ps1 等）からプロジェクトの通知経路でアラートを送るための入口。
+      // Usage: tsx app/cli.ts notify "<subject>" "<body>"
+      const subject = process.argv[3] ?? "(no subject)";
+      const body = process.argv[4] ?? "";
+      const { makeNotifier } = await import("./core/notifier.js");
+      await makeNotifier().notifyError(subject, body);
+      break;
+    }
     case "health-check": {
       logger.info("health-check: not implemented yet");
       break;
@@ -77,7 +86,9 @@ async function main(): Promise<void> {
       break;
     }
     default: {
-      console.error("Usage: tsx app/cli.ts <sync|login|health-check>");
+      console.error(
+        "Usage: tsx app/cli.ts <sync|sync-transactions|sync-assets|login|check-session|notify|health-check>",
+      );
       process.exit(1);
     }
   }

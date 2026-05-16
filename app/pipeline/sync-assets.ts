@@ -1,6 +1,7 @@
 import { launchBrowser } from "../core/browser.js";
 import { loadConfig, requireSheetsConfig } from "../core/config.js";
 import { logger } from "../core/logger.js";
+import { makeNotifier } from "../core/notifier.js";
 import {
   appendRows,
   createSheetsClient,
@@ -192,6 +193,39 @@ export async function syncAssets(
     }
 
     if (sheets) {
+      // 異常値ガード: 直近月の純資産(N列)から ±70% を超えて乖離していたら
+      // スクレイプ失敗 / 画面変更 / セッション失効の疑い。書き込まず通知して中断する。
+      // （total_assets<=0 は AssetSnapshotSchema の refine が別途弾く）
+      const netWorthCol = await readColumnValues(sheets, ASSETS_SHEET_NAME, "N");
+      const prevNetWorth = netWorthCol
+        .map((v) => Number(String(v).replace(/[,¥\s]/g, "")))
+        .filter((n) => Number.isFinite(n))
+        .pop();
+      if (
+        prevNetWorth !== undefined &&
+        Math.abs(prevNetWorth) > 1_000_000 &&
+        Math.abs(snapshot.net_worth - prevNetWorth) / Math.abs(prevNetWorth) > 0.7
+      ) {
+        const subject = "資産スナップショットの異常値を検知（書き込みをskip）";
+        const body =
+          `前月純資産 ${prevNetWorth.toLocaleString()} 円 → 今回 ${snapshot.net_worth.toLocaleString()} 円` +
+          `（±70%超の乖離）。${snapshotDate} の「${ASSETS_SHEET_NAME}」書き込みを中止しました。\n` +
+          `スクレイプ失敗 / Money Forward 画面変更 / セッション失効の可能性。手動で確認してください。`;
+        logger.error(body);
+        try {
+          await makeNotifier(config).notifyError(subject, body);
+        } catch (e: unknown) {
+          logger.error("Notifier itself failed", { error: String(e) });
+        }
+        return {
+          scraped: true,
+          appended: false,
+          skipped: true,
+          reason: "net_worth_anomaly",
+          dryRun: false,
+        };
+      }
+
       const row = ASSETS_KEY_ORDER.map((k) => {
         const v = (snapshot as Record<string, unknown>)[k];
         return typeof v === "number" ? v : String(v ?? "");

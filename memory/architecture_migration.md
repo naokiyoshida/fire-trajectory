@@ -81,3 +81,21 @@ FIRE必要資産ライン (2026-05-16 追加):
   比較は ISNUMBER(I) の行のみ（目標年齢超の "" 行を除外）。
 - 旧キー（本人手取り月収 / 配偶者年収_年額）は migration でサイレント破棄し新デフォルトで上書き。
   既存値の保持は項目名キーで突き合わせるため並び替えに非依存。
+
+改善バッチ (2026-05-17, 監査5項目+α):
+- ③ 設定シートB列に入力規則(setDataValidation): pct=-0.1〜1 / date=requireDate /
+  age int=1〜200 / yen>=0、setAllowInvalid(false)+helpText。数式セルは対象外。
+- ② サイレント失敗の可視化: notifier フォールバックを warn 化、cli に `notify` 追加、
+  sync-transactions は scraped=0 で ScrapingError、sync-assets は前月純資産比 ±70%超で
+  書込skip+通知(reason=net_worth_anomaly)、AssetSnapshotSchema に total_assets>0 refine、
+  run-sync.ps1 で check-session 事前実行→失効時 SESSION_EXPIRED.txt+notify+exit2。
+- ⑤ lint に GAS構文チェック追加 (scripts/check-gas-syntax.mjs, vm.Script)。
+  app/gas/formula-builders.ts を数式の正準仕様化し tests/gas/ で契約テスト
+  (.gs テンプレと突合しドリフト検出)。.github/workflows/ci.yml (push/PR で lint+test)。
+- ① 年金・退職一時金を将来名目額入力とみなし realDeflator=(1+infl)^(i/12) で実質割戻し
+  (incUserPen/incSpousePen/incUserLump/incSpouseLump)。実質モデルとの混在バグ修正。
+- ④ FIRE射程に逆算指標: 現在の月次収支(F2) / FIRE可能までの目安年数 /
+  1年前倒しに必要な月次追加貯蓄(概算)。
+- 未上場株式(インテグレ): MF /bs/portfolio には含まれず total_assets=MF合計+手動。
+  原則は手動入力資産シートに入力、MFの資産総額に既含なら二重計上回避で空欄(0)。
+  手動入力資産シートに雛形行 seed + E:H に説明パネル + A1 ノートを GAS が自動生成。

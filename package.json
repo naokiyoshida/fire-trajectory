@@ -9,7 +9,8 @@
   },
   "scripts": {
     "build": "tsc",
-    "lint": "tsc --noEmit",
+    "lint": "tsc --noEmit && node scripts/check-gas-syntax.mjs",
+    "check-gas": "node scripts/check-gas-syntax.mjs",
     "test": "vitest run",
     "test:watch": "vitest",
     "dev": "tsx app/cli.ts",

@@ -72,6 +72,9 @@ export function makeNotifier(config?: Config): Notifier {
     logger.info(`Using GmailNotifier (from=${cfg.GMAIL_USER}, to=${cfg.NOTIFY_EMAIL})`);
     return new GmailNotifier(cfg.GMAIL_USER, cfg.GMAIL_APP_PASSWORD, cfg.NOTIFY_EMAIL);
   }
-  logger.info("Using ConsoleNotifier (set GMAIL_USER, GMAIL_APP_PASSWORD, NOTIFY_EMAIL in .env to enable email)");
+  logger.warn(
+    "メール通知が未設定のため ConsoleNotifier にフォールバック: 失敗してもメールは飛ばずログのみ。" +
+      "無人の月次実行を監視するには .env に GMAIL_USER / GMAIL_APP_PASSWORD / NOTIFY_EMAIL を設定してください。",
+  );
   return new ConsoleNotifier();
 }

@@ -70,5 +70,8 @@ export const AssetSnapshotSchema = z.object({
   // 計算値
   net_worth: z.number().int(),
   notes: z.string(),
+}).refine((d) => d.total_assets > 0, {
+  message: "total_assets must be > 0（全0スクレイプ＝取得失敗の疑い）",
+  path: ["total_assets"],
 });
 export type AssetSnapshot = z.infer<typeof AssetSnapshotSchema>;

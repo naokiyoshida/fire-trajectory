@@ -55,11 +55,44 @@ Write-LogLine "Using npm: $NpmPath"
 
 Set-Location $ProjectDir
 
+$SessionFlag = Join-Path $LogsDir "SESSION_EXPIRED.txt"
+$sessionExpired = $false
+
 try {
+    # 1) セッション事前チェック。失効していると無人実行は何も取得できずに
+    #    「正常終了」してしまうため、ここで早期に検知して可視化する。
+    $csOut = & $NpmPath run -s check-session 2>&1
+    $csCode = $LASTEXITCODE
+    $csOut | ForEach-Object { Add-Content -Path $LogFile -Value $_ }
+    Write-LogLine "check-session exited with code $csCode"
+
+    if ($csCode -eq 2) {
+        $sessionExpired = $true
+        $ts = Get-Date -Format "yyyy-MM-dd HH:mm:ss"
+        Set-Content -Path $SessionFlag -Value "[$ts] セッション失効。手動で 'npm run login' を実行してください。"
+        Write-LogLine "SESSION EXPIRED: 手動で 'npm run login' が必要。フラグ: $SessionFlag"
+        # プロジェクトの通知経路でメール（未設定ならログのみ）。失敗しても続行。
+        try {
+            & $NpmPath run -s dev -- notify "セッション失効: 月次同期が実行できません" "run-sync.ps1: check-session が失効を検知。$ProjectDir で 'npm run login' を実行してください。" 2>&1 |
+                ForEach-Object { Add-Content -Path $LogFile -Value $_ }
+        } catch {
+            Write-LogLine "notify 呼び出しに失敗: $_"
+        }
+    }
+    elseif (Test-Path $SessionFlag) {
+        # セッションが回復したら古いフラグを掃除
+        Remove-Item $SessionFlag -Force -ErrorAction SilentlyContinue
+        Write-LogLine "セッション回復: 旧 SESSION_EXPIRED フラグを削除"
+    }
+
+    # 2) 本同期。セッション失効時も実行する（各 pipeline の通知経路にも乗せるため）。
     $output = & $NpmPath run sync 2>&1
     $exitCode = $LASTEXITCODE
     $output | ForEach-Object { Add-Content -Path $LogFile -Value $_ }
     Write-LogLine "npm run sync exited with code $exitCode"
+
+    # セッション失効時は Task Scheduler の「前回の実行結果」で失敗が見えるよう非0で終了
+    if ($sessionExpired) { exit 2 }
     exit $exitCode
 }
 catch {

@@ -1,0 +1,27 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  lint-and-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      # tsc --noEmit + GAS(.gs) 構文チェック（scripts/check-gas-syntax.mjs）
+      - name: Lint (type-check + GAS syntax)
+        run: npm run lint
+
+      # vitest（数式ビルダー契約テスト含む）。Playwright は不要なので走らせない。
+      - name: Test
+        run: npm test
