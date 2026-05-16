@@ -62,7 +62,7 @@ Node が `Google Sheets API` で書き込み。
 
 | 列 | 名称 | 型 | 説明 |
 |---|---|---|---|
-| A | ID | string (SHA256) | 重複排除用ハッシュ。`SHA256(date-content-amount-source)`。**category は意図的に除外**（マネフォME はカテゴリを後から編集でき、含めると編集のたび別 ID 化して二重追記されるため）。旧式（category 込み）からの移行は `npm run remap-ids`（DEPLOY_GUIDE §8.6） |
+| A | ID | string (SHA256) | 重複排除用ハッシュ。`SHA256(date-content-amount-source)`。**category は意図的に除外**（マネフォME はカテゴリを後から編集でき、含めると編集のたび別 ID 化して二重追記されるため）。旧式（category 込み）からの移行は `npm run remap-ids`（DEPLOY_GUIDE §8.6）。**既知の制約**: 同日・同額・同口座・同内容の別取引（例: 同日に ¥10,000 ATM 出金を2回）は衝突し2件目が取りこぼされる。定常的に該当する場合は当月支出を手動補正 |
 | B | 日付 | string (`YYYY/MM/DD`) | 取引日 |
 | C | 内容 | string | 取引内容 |
 | D | 金額 | string (Sheets が数値推論) | 円。マイナス = 支出 |

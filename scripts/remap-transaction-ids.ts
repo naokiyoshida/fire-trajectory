@@ -46,6 +46,8 @@ async function main(): Promise<void> {
     content: string;
     amount: string;
     source: string;
+    category: string;
+    fetchedAt: string; // G列 取得日時。run ごとに固定値なので由来判定に使う
   }
   const newIdColumn: string[][] = [];
   let changed = 0;
@@ -78,7 +80,15 @@ async function main(): Promise<void> {
     });
     newIdColumn.push([newId]);
     const group = newIdRows.get(newId) ?? [];
-    group.push({ sheetRow: r + 2, date, content, amount, source });
+    group.push({
+      sheetRow: r + 2,
+      date,
+      content,
+      amount,
+      source,
+      category: cell(COL.category),
+      fetchedAt: cell(6),
+    });
     newIdRows.set(newId, group);
     if (newId !== oldId) {
       changed += 1;
@@ -104,23 +114,38 @@ async function main(): Promise<void> {
       `\n⚠ 再計算後に同一 ID が重複する行が ${dupRows} 行あります（${dupGroups.length} グループ）。`,
     );
     console.log(
-      "  これは category 編集で過去に二重追記された実際の重複です。ID 振り直し自体は安全ですが、",
+      "  ID 振り直し自体は安全です。ただし重複行は自動削除しません（誤って実取引を消さないため）。",
     );
     console.log(
-      "  重複行は自動削除されません。下記の各グループで「残す1行」以外をシートから削除してください。",
+      "  由来は取得日時(G列)で判別できます: run ごとに固定値なので —",
+    );
+    console.log(
+      "    ・取得日時が【異なる】 → 別 run での再追記＝二重追記。新しい取得日時の行を削除。",
+    );
+    console.log(
+      "    ・取得日時が【同一】 → 同一 run で MF が別取引として返した（category 違い等）＝",
+    );
+    console.log(
+      "      実取引の可能性が高い。原則どちらも残す（消すと実支出が欠落）。",
     );
     console.log("\n=== 重複グループ（取引履歴シートの行番号つき） ===");
     let gi = 0;
     for (const g of dupGroups) {
       gi += 1;
       const h = g[0]!;
+      const allSameFetched = g.every((m) => m.fetchedAt === h.fetchedAt);
+      const verdict = allSameFetched
+        ? "同一 run 取得 → 実取引の可能性。原則どちらも保持"
+        : "取得日時が混在 → 再追記の疑い。新しい取得日時の行を削除候補";
       console.log(
         `\n[${gi}] ${h.date} | ${h.content} | ${h.amount} | ${h.source}`,
       );
-      const sortedRows = g.map((m) => m.sheetRow).sort((a, b) => a - b);
-      console.log(
-        `    重複行: ${sortedRows.join(", ")}（${sortedRows[0]} を残し他を削除）`,
-      );
+      for (const m of [...g].sort((a, b) => a.sheetRow - b.sheetRow)) {
+        console.log(
+          `    行${m.sheetRow} 取得日時=${m.fetchedAt || "(空)"} category=${m.category || "(空)"}`,
+        );
+      }
+      console.log(`    判定: ${verdict}`);
     }
   }
 
