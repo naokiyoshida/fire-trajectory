@@ -173,6 +173,8 @@ function setupSimulation() {
     { key: 'インフレ率',                def: 0.02,      desc: '年率。例: 0.02 = 2%（日銀目標2% / 直近CPI 2.7〜3.2%。0 は非現実的）', fmt: 'pct' },
     { key: 'FIRE射程_盤石閾値',         def: 30000000,  desc: '終了年齢時点の予想資産がこの額超で「◎◎◎ 盤石」。例: 30000000', fmt: 'yen' },
     { key: 'FIRE射程_余裕閾値',         def: 5000000,   desc: '同上で「◎ 余裕」。例: 5000000', fmt: 'yen' },
+    { key: 'FIRE必要資産_目標年齢',     def: 100,       desc: 'この年齢まで資産が枯渇しなければFIRE可と判定（年金のみ・就労収入と退職金は当てにしない前提）。例: 100（保守的にするなら95等。範囲 1〜200）', fmt: 'int' },
+    { key: 'FIRE必要資産_目標残額',     def: 0,         desc: '目標年齢の時点で残しておきたい資産。0=使い切り、相続等で残すなら金額。例: 0', fmt: 'yen' },
     { key: 'シミュレーション終了年齢',  def: 100,       desc: '本人が何歳になるまで月次試算するか。例: 100（範囲 1〜200）', fmt: 'int' },
 
     { section: '■ 本人（僕）の設定' },
@@ -275,7 +277,7 @@ function setupSimulation() {
   }
   simSheet.clear();
 
-  const simHeaders = ['年月', '本人年齢', '期首資産', '収入', '支出', '収支', '実質利回り(月)', '期末資産'];
+  const simHeaders = ['年月', '本人年齢', '期首資産', '収入', '支出', '収支', '実質利回り(月)', '期末資産', 'FIRE必要資産(目標年齢まで)'];
   simSheet.getRange(1, 1, 1, simHeaders.length).setValues([simHeaders]).setBackground('#f3f3f3').setFontWeight('bold');
 
   const startDate = new Date();
@@ -290,7 +292,14 @@ function setupSimulation() {
   let simEndAge = parseInt(String(getCurrentValue_(settingItems, existingValues, 'シミュレーション終了年齢')), 10);
   if (!Number.isFinite(simEndAge) || simEndAge <= 0 || simEndAge > 200) simEndAge = 100;
 
-  const endYear = userBdayDate.getFullYear() + simEndAge;
+  // FIRE必要資産ライン（I列）は末尾の「目標年齢の月」から逆算する。
+  // そのアンカー行が必ず存在するよう、行数は シミュレーション終了年齢 と
+  // FIRE必要資産_目標年齢 の大きい方まで生成する。
+  let fireTargetAge = parseInt(String(getCurrentValue_(settingItems, existingValues, 'FIRE必要資産_目標年齢')), 10);
+  if (!Number.isFinite(fireTargetAge) || fireTargetAge <= 0 || fireTargetAge > 200) fireTargetAge = 100;
+  const effEndAge = Math.max(simEndAge, fireTargetAge);
+
+  const endYear = userBdayDate.getFullYear() + effEndAge;
   const endMonth = userBdayDate.getMonth();
 
   let initialRows = (endYear - startDate.getFullYear()) * 12 + (endMonth - startDate.getMonth()) + 1;
@@ -327,6 +336,8 @@ function setupSimulation() {
     Inflation:             L('インフレ率'),
     FireSafeThreshold:     L('FIRE射程_盤石閾値'),
     FireComfortThreshold:  L('FIRE射程_余裕閾値'),
+    FireTargetAge:         L('FIRE必要資産_目標年齢'),
+    FireTargetResidual:    L('FIRE必要資産_目標残額'),
     SimEndAge:             L('シミュレーション終了年齢')
   };
 
@@ -363,6 +374,22 @@ function setupSimulation() {
 
     const monthlyRealYield = `=((1+${D.NominalYield})/(1+${D.Inflation}))^(1/12) - 1`;
 
+    // FIRE必要資産ライン（I列）:
+    //   「この月で就労収入が途絶えても、年金だけで FIRE必要資産_目標年齢 まで
+    //    資産が尽きない最低期首資産」を末尾から逆算する。
+    //   退職一時金は『働き続けないと得られない』ため当てにしない（年金のみ算入）。
+    //   逆算: I(r) = I(r+1)/(1+実質利回り) - 年金(r) + 支出(r)
+    //         末尾（目標年齢の最終月）の次は I の代わりに 目標残額 を使う。
+    //   予想資産(H) がこの線(I) を上回った最初の月 = FIRE 可能時期。
+    const niFire = `(${incUserPen} + ${incSpousePen})`;
+    // 最終行は下の行を参照しない（行トリム後は枠外参照になり #REF! になるため）。
+    // 最終行は effEndAge（>= 目標年齢）なので、目標年齢ならここが終端、超過なら IF で "" になる。
+    const isLastRow = (i === initialRows - 1);
+    const nextReq = isLastRow
+      ? `${D.FireTargetResidual}`
+      : `IF(OR(NOT(ISNUMBER(B${rowIdx + 1})), B${rowIdx + 1} > ${D.FireTargetAge}), ${D.FireTargetResidual}, I${rowIdx + 1})`;
+    const fireNeed = `=IF(B${rowIdx} > ${D.FireTargetAge}, "", (${nextReq})/(1+G${rowIdx}) - ${niFire} + E${rowIdx})`;
+
     rows.push([
       aColVal,
       ageFormula,
@@ -371,7 +398,8 @@ function setupSimulation() {
       expense,
       `=D${rowIdx}-E${rowIdx}`,
       monthlyRealYield,
-      `=(C${rowIdx}+F${rowIdx})*(1+G${rowIdx})`
+      `=(C${rowIdx}+F${rowIdx})*(1+G${rowIdx})`,
+      fireNeed
     ]);
   }
 
@@ -442,16 +470,19 @@ function createTrajectoryChart(sheet, userBday) {
     console.warn('Custom hAxis ticks failed, falling back: ' + e);
   }
 
+  // 期末資産(H)と FIRE必要資産(I) の2本を折れ線で重ね、交点＝FIRE可能時期を読み取れるようにする
   const chart = sheet.newChart()
-    .setChartType(Charts.ChartType.AREA)
-    .addRange(sheet.getRange(1, 1, lastRow, 1))
-    .addRange(sheet.getRange(1, 8, lastRow, 1))
-    .setPosition(2, 10, 0, 0)
-    .setOption('title', '資産推移シミュレーション')
+    .setChartType(Charts.ChartType.LINE)
+    .addRange(sheet.getRange(1, 1, lastRow, 1))   // x: 年月
+    .addRange(sheet.getRange(1, 8, lastRow, 1))   // 系列1: 期末資産（予想）
+    .addRange(sheet.getRange(1, 9, lastRow, 1))   // 系列2: FIRE必要資産（目標年齢まで枯渇しない最低ライン）
+    .setPosition(2, 11, 0, 0)
+    .setOption('title', '資産推移と FIRE必要ライン（予想資産が必要ラインを上回った時がFIRE可能）')
     .setOption('hAxis', hAxisOption)
     .setOption('vAxis', { title: '資産額 (円)' })
-    .setOption('width', 900)
-    .setOption('height', 500)
+    .setOption('legend', { position: 'bottom' })
+    .setOption('width', 960)
+    .setOption('height', 520)
     .build();
 
   sheet.insertChart(chart);
@@ -689,7 +720,24 @@ function setupReportFireReadiness_(ss) {
     ' IF(B7>0, "△ ギリギリ", "✕ 枯渇"))), ' + simNoData + ')'
   );
 
-  sheet.setColumnWidth(1, 230);
+  // FIRE可能時期: 予想資産(H) が FIRE必要資産ライン(I) を初めて上回る月。
+  // I が数値の行のみ比較（目標年齢超の "" 行を除外）。到達済みなら最初の月＝今。
+  const refFireTargetAge = dashLookup_(dashRef, 'FIRE必要資産_目標年齢');
+  const fireMatch =
+    'MATCH(TRUE, ARRAYFORMULA(IF(ISNUMBER(' + simRef + '!I2:I), ' +
+    simRef + '!H2:H >= ' + simRef + '!I2:I, FALSE)), 0)';
+
+  sheet.getRange('A11').setFormula('="FIRE可能時期（"&' + refFireTargetAge + '&"歳まで枯渇しない前提）"');
+  sheet.getRange('B11').setFormula(
+    '=IFERROR(TEXT(INDEX(' + simRef + '!A:A, ' + fireMatch + '+1), "yyyy/MM"), "期間内に到達せず")'
+  );
+
+  sheet.getRange('A12').setValue('FIRE可能時の本人年齢');
+  sheet.getRange('B12').setFormula(
+    '=IFERROR(INDEX(' + simRef + '!B:B, ' + fireMatch + '+1), ' + simNoData + ')'
+  );
+
+  sheet.setColumnWidth(1, 260);
   sheet.setColumnWidth(2, 200);
 }
 
@@ -804,7 +852,7 @@ function applyFormattingSimulation_(ss) {
   const sheet = ss.getSheetByName(SHEET.SIMULATION);
   if (!sheet) return;
 
-  sheet.getRange('A1:H1').setBackground(COLOR_DEFAULT).setFontWeight('bold');
+  sheet.getRange('A1:I1').setBackground(COLOR_DEFAULT).setFontWeight('bold');
 
   const lastRow = sheet.getLastRow();
   if (lastRow >= 2) {
@@ -813,9 +861,10 @@ function applyFormattingSimulation_(ss) {
     sheet.getRange(2, 1, dataRows, 1).setNumberFormat(FMT_YM);
     // B 本人年齢
     sheet.getRange(2, 2, dataRows, 1).setNumberFormat(FMT_INT);
-    // C/D/E/F/H 円
+    // C/D/E/F 円
     sheet.getRange(2, 3, dataRows, 4).setNumberFormat(FMT_YEN);
-    sheet.getRange(2, 8, dataRows, 1).setNumberFormat(FMT_YEN);
+    // H 期末資産 / I FIRE必要資産 円
+    sheet.getRange(2, 8, dataRows, 2).setNumberFormat(FMT_YEN);
     // G 月次実質利回り
     sheet.getRange(2, 7, dataRows, 1).setNumberFormat('0.000%');
   }
@@ -823,6 +872,7 @@ function applyFormattingSimulation_(ss) {
   sheet.setColumnWidth(1, 90);
   sheet.setColumnWidth(2, 90);
   for (let c = 3; c <= 8; c++) sheet.setColumnWidth(c, 130);
+  sheet.setColumnWidth(9, 180);
 }
 
 function applyFormattingReports_(ss) {
@@ -867,10 +917,11 @@ function applyFormattingReports_(ss) {
     }
   }
 
-  // FIRE射程：B5 日付、B6/B7/B8 円
+  // FIRE射程：B5 日付、B6/B7/B8 円、B12 本人年齢（整数）
   const fr = ss.getSheetByName(SHEET.REPORT_FIRE);
   if (fr) {
     fr.getRange('B5').setNumberFormat(FMT_DATE);
     fr.getRange('B6:B8').setNumberFormat(FMT_YEN);
+    fr.getRange('B12').setNumberFormat(FMT_INT);
   }
 }
