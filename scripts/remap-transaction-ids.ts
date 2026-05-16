@@ -40,13 +40,21 @@ async function main(): Promise<void> {
   const rows = (res.data.values ?? []) as string[][];
   console.log(`Loaded ${rows.length} rows from ${DATABASE_SHEET_NAME}\n`);
 
+  interface RowInfo {
+    sheetRow: number;
+    date: string;
+    content: string;
+    amount: string;
+    source: string;
+  }
   const newIdColumn: string[][] = [];
   let changed = 0;
   let blankSkipped = 0;
   const sample: string[] = [];
-  const newIdCount = new Map<string, number>();
+  const newIdRows = new Map<string, RowInfo[]>();
 
-  for (const row of rows) {
+  for (let r = 0; r < rows.length; r++) {
+    const row = rows[r] ?? [];
     const cell = (i: number): string => String(row[i] ?? "");
     const date = cell(COL.date);
     const content = cell(COL.content);
@@ -69,7 +77,9 @@ async function main(): Promise<void> {
       category: cell(COL.category),
     });
     newIdColumn.push([newId]);
-    newIdCount.set(newId, (newIdCount.get(newId) ?? 0) + 1);
+    const group = newIdRows.get(newId) ?? [];
+    group.push({ sheetRow: r + 2, date, content, amount, source });
+    newIdRows.set(newId, group);
     if (newId !== oldId) {
       changed += 1;
       if (sample.length < 5) {
@@ -80,8 +90,8 @@ async function main(): Promise<void> {
     }
   }
 
-  const dupGroups = [...newIdCount.values()].filter((n) => n > 1);
-  const dupRows = dupGroups.reduce((s, n) => s + (n - 1), 0);
+  const dupGroups = [...newIdRows.values()].filter((g) => g.length > 1);
+  const dupRows = dupGroups.reduce((s, g) => s + (g.length - 1), 0);
 
   console.log(`再計算で ID が変わる行: ${changed} / ${rows.length}`);
   console.log(`空行（ID 据え置き）: ${blankSkipped}`);
@@ -97,8 +107,21 @@ async function main(): Promise<void> {
       "  これは category 編集で過去に二重追記された実際の重複です。ID 振り直し自体は安全ですが、",
     );
     console.log(
-      "  重複行は自動削除されません。シート上で日付・内容・金額・口座が同一の行を目視で1行に整理してください。",
+      "  重複行は自動削除されません。下記の各グループで「残す1行」以外をシートから削除してください。",
     );
+    console.log("\n=== 重複グループ（取引履歴シートの行番号つき） ===");
+    let gi = 0;
+    for (const g of dupGroups) {
+      gi += 1;
+      const h = g[0]!;
+      console.log(
+        `\n[${gi}] ${h.date} | ${h.content} | ${h.amount} | ${h.source}`,
+      );
+      const sortedRows = g.map((m) => m.sheetRow).sort((a, b) => a - b);
+      console.log(
+        `    重複行: ${sortedRows.join(", ")}（${sortedRows[0]} を残し他を削除）`,
+      );
+    }
   }
 
   if (dryRun) {
