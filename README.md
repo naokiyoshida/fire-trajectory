@@ -20,29 +20,32 @@ Money Forward ME の取引明細と資産スナップショットを月次で自
    ├ 取引履歴       (取引明細、Node が書き込み)
    ├ 資産推移       (月次の資産スナップショット、Node が書き込み)
    ├ 手動入力資産   (未上場株式等の手動入力、ユーザーが管理)
-   ├ 設定           (シミュレーション入力、GAS が初期化)
-   ├ シミュレーション (FIRE 月次予測、GAS が構築)
-   └ 月次収支 / カテゴリ別支出 / 純資産推移 / 資産配分 / FIRE射程
+   ├ 設定           (シミュレーション入力ストア、GAS が初期化)
+   └ 月次収支 / カテゴリ別支出 / 純資産推移 / 資産配分
                     (集計レポート、GAS が QUERY で構築)
    │
    ▼
 [Claude プロジェクト「資産運用計画」] - ナラティブ層
    Drive コネクタ経由で上記 Sheets を参照し、目標年齢・前提条件・戦略を議論
+
+FIRE 月次予測は Sheets ではなく `npm run sim` が生成する完全ローカルな
+インタラクティブ HTML（`dist/fire.html`）。計算の正は `app/sim/engine.ts`。
 ```
 
 ## 主要コンポーネント
 
 | 階層 | パス | 役割 |
 |---|---|---|
-| エントリポイント | `app/cli.ts` | CLI コマンド (`sync` / `login` / `check-session` / `snapshot`) |
+| エントリポイント | `app/cli.ts` | CLI コマンド (`sync` / `login` / `check-session` / `doctor` / `sim`) |
 | 取引スクレイパ | `app/scrapers/transactions/` | navigator / extractor / selectors / schema / transformer |
 | 資産スクレイパ | `app/scrapers/assets/` | 同上の構成、`/bs/portfolio` と `/bs/liability` を扱う |
 | パイプライン | `app/pipeline/sync-transactions.ts`, `app/pipeline/sync-assets.ts` | スクレイプ → 検証 → Sheets 書き込みの統括 |
 | 共通コア | `app/core/` | browser (Playwright), sheets-client (Sheets API), notifier (Gmail SMTP), config (zod), logger, errors |
 | 認証 | `app/auth/` | 初回ログインフローと storageState 管理 |
-| GAS | `src/gas_receiver_service.gs` | 「設定」「シミュレーション」「月次収支」等のシート構築 (`setupSimulation`, `setupReports`) |
+| シミュレーション | `app/sim/` | engine（唯一の正）/ load-inputs / render-html / sliders / template（`dist/fire.html` 生成） |
+| GAS | `src/gas_receiver_service.gs` | 「設定」入力ストアと「月次収支」等レポートのシート構築 (`setupSettings`, `setupReports`) |
 | ランチャ | `scripts/run-sync.ps1` | Windows タスクスケジューラ用 |
-| テスト | `tests/` | vitest による純関数テスト (35本) |
+| テスト | `tests/` | vitest による純関数テスト (93本) |
 
 ## 設計原則
 
