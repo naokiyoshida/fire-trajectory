@@ -14,8 +14,13 @@
   .headline.warn { background: #ffe0e0; }
   .wrap { display: flex; flex-wrap: wrap; gap: 20px; align-items: flex-start; }
   .panel { flex: 1 1 280px; min-width: 260px; }
-  .chartbox { flex: 2 1 520px; min-width: 300px; }
-  canvas { width: 100%; height: 360px; border: 1px solid #ccc; border-radius: 6px; }
+  .chartbox { flex: 2 1 520px; min-width: 300px; position: relative; }
+  canvas { width: 100%; height: 360px; border: 1px solid #ccc; border-radius: 6px;
+    display: block; touch-action: none; }
+  #tip { position: absolute; display: none; pointer-events: none;
+    background: rgba(33,33,33,.92); color: #fff; font-size: 12px;
+    padding: 6px 8px; border-radius: 4px; line-height: 1.4; white-space: nowrap;
+    z-index: 5; }
   .sld { margin: 10px 0; }
   .sld label { display: flex; justify-content: space-between;
     font-size: 13px; margin-bottom: 2px; }
@@ -36,10 +41,11 @@
 <div class="wrap">
   <div class="chartbox">
     <canvas id="chart" width="900" height="360"></canvas>
+    <div id="tip"></div>
     <div class="legend">
       <span class="b">■ 期末資産（このまま働き続けた予想）</span>
       <span class="o">■ FIRE必要資産（働かなくても目標年齢まで持つ最低額）</span>
-      交点＝FIRE可能時期
+      緑＝FIRE可能時期 / 赤＝資産枯渇 / グラフにマウスを乗せると各月の値
     </div>
     <button id="dbgBtn" type="button">デバッグ表を表示/非表示</button>
     <pre id="dbg"></pre>
@@ -67,6 +73,10 @@ var PROFILE = "__PROFILE_DEFAULT__";
   var params = Object.assign({}, BASE_PARAMS);
   var canvas = document.getElementById("chart");
   var ctx = canvas.getContext("2d");
+  var tip = document.getElementById("tip");
+  var lastRes = null;   // 直近の simulate 結果（リサイズ/ホバー再描画用）
+  var hoverIdx = -1;    // マウスオーバー中の月インデックス
+  var layout = null;    // 直近の描画ジオメトリ（ヒットテスト用）
 
   function fmt(v, unit) {
     if (unit === "%") return (v * 100).toFixed(1) + "%";
@@ -74,35 +84,82 @@ var PROFILE = "__PROFILE_DEFAULT__";
     if (unit === "歳") return v + "歳";
     return Math.round(v).toLocaleString() + "円";
   }
-  function yen(v) {
-    return "¥" + Math.round(v).toLocaleString();
+  function yen(v) { return "¥" + Math.round(v).toLocaleString(); }
+  // Y 軸目盛りラベル（億 / 万）
+  function moneyLabel(v) {
+    if (Math.abs(v) >= 1e8) return (v / 1e8).toFixed(2).replace(/\.?0+$/, "") + "億";
+    if (Math.abs(v) >= 1e4) return Math.round(v / 1e4).toLocaleString() + "万";
+    return String(Math.round(v));
+  }
+  // 0..max を「キリのよい」目盛り列に（5本前後）
+  function niceTicks(max) {
+    if (max <= 0) return [0, 1];
+    var rough = max / 4;
+    var pow = Math.pow(10, Math.floor(Math.log(rough) / Math.LN10));
+    var u = rough / pow;
+    var step = (u >= 5 ? 10 : u >= 2 ? 5 : u >= 1 ? 2 : 1) * pow;
+    var ticks = [];
+    for (var t = 0; t <= max + step * 0.5; t += step) ticks.push(t);
+    return ticks;
+  }
+  // CSS サイズ × devicePixelRatio でバッキングストアを設定（Retina/スマホで鮮明に）
+  function fit() {
+    var dpr = window.devicePixelRatio || 1;
+    var cssW = canvas.clientWidth || 900;
+    var cssH = canvas.clientHeight || 360;
+    canvas.width = Math.round(cssW * dpr);
+    canvas.height = Math.round(cssH * dpr);
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    return { W: cssW, H: cssH };
   }
 
   function draw(res) {
-    var W = canvas.width, H = canvas.height, padL = 70, padB = 28, padT = 12, padR = 12;
+    var dim = fit();
+    var W = dim.W, H = dim.H;
+    var padL = 64, padB = 30, padT = 14, padR = 14;
     ctx.clearRect(0, 0, W, H);
-    var rows = res.monthly;
-    var n = rows.length;
+    var rows = res.monthly, n = rows.length;
     if (!n) return;
-    var lo = Infinity, hi = -Infinity;
+
+    // 縦軸は 0 起点（0 より下は表示しない）。上端は最大値のキリのよい目盛り。
+    var hiData = 0;
     for (var i = 0; i < n; i++) {
-      var e = rows[i].endAssets;
-      if (e < lo) lo = e; if (e > hi) hi = e;
-      var f = rows[i].fireNeed;
-      if (f != null) { if (f < lo) lo = f; if (f > hi) hi = f; }
+      if (rows[i].endAssets > hiData) hiData = rows[i].endAssets;
+      var fv = rows[i].fireNeed;
+      if (fv != null && fv > hiData) hiData = fv;
     }
-    if (lo === hi) { hi = lo + 1; }
-    function X(i) { return padL + (W - padL - padR) * (i / (n - 1)); }
-    function Y(v) { return padT + (H - padT - padB) * (1 - (v - lo) / (hi - lo)); }
-    // 0 ライン
-    ctx.strokeStyle = "#ddd"; ctx.beginPath();
-    ctx.moveTo(padL, Y(0)); ctx.lineTo(W - padR, Y(0)); ctx.stroke();
-    // 軸ラベル（資産レンジと両端の年）
-    ctx.fillStyle = "#666"; ctx.font = "11px sans-serif";
-    ctx.fillText((hi / 1e8).toFixed(1) + "億", 4, Y(hi) + 4);
-    ctx.fillText((lo / 1e8).toFixed(1) + "億", 4, Y(lo) + 4);
-    ctx.fillText(rows[0].ym, padL, H - 8);
-    ctx.fillText(rows[n - 1].ym, W - padR - 36, H - 8);
+    if (hiData <= 0) hiData = 1;
+    var ticks = niceTicks(hiData);
+    var top = ticks[ticks.length - 1];
+
+    function X(i) { return padL + (W - padL - padR) * (n === 1 ? 0 : i / (n - 1)); }
+    function Y(v) { var c = v < 0 ? 0 : v; return padT + (H - padT - padB) * (1 - c / top); }
+    layout = { n: n, X: X, Y: Y, padL: padL, padR: padR, W: W };
+
+    // Y 目盛り＋横グリッド＋値ラベル
+    ctx.font = "11px sans-serif"; ctx.textBaseline = "middle";
+    for (var k = 0; k < ticks.length; k++) {
+      var ty = Y(ticks[k]);
+      ctx.strokeStyle = ticks[k] === 0 ? "#bbb" : "#eee";
+      ctx.beginPath(); ctx.moveTo(padL, ty); ctx.lineTo(W - padR, ty); ctx.stroke();
+      ctx.fillStyle = "#666"; ctx.textAlign = "right";
+      ctx.fillText(moneyLabel(ticks[k]), padL - 6, ty);
+    }
+    // X 目盛り（年ラベル）。年初 or 約8等分でグリッド＋西暦。
+    ctx.textAlign = "center"; ctx.textBaseline = "top";
+    var lastYr = null, xstep = Math.max(1, Math.round(n / 8));
+    for (var x = 0; x < n; x++) {
+      var yr = rows[x].ym.slice(0, 4);
+      var isJan = rows[x].ym.slice(5) === "01" && yr !== lastYr;
+      if (!isJan && x % xstep !== 0) continue;
+      lastYr = yr;
+      var gx = X(x);
+      ctx.strokeStyle = "#f3f3f3";
+      ctx.beginPath(); ctx.moveTo(gx, padT); ctx.lineTo(gx, H - padB); ctx.stroke();
+      ctx.fillStyle = "#666";
+      ctx.fillText(yr, gx, H - padB + 6);
+    }
+
     function line(getter, color) {
       ctx.strokeStyle = color; ctx.lineWidth = 2; ctx.beginPath();
       var started = false;
@@ -116,25 +173,84 @@ var PROFILE = "__PROFILE_DEFAULT__";
     }
     line(function (r) { return r.endAssets; }, "#1565c0");
     line(function (r) { return r.fireNeed; }, "#e65100");
-    // 交点（FIRE可能時期）に縦線
-    if (res.fireDate) {
+
+    // 縦マーカー（FIRE可能時期 / 資産枯渇）に日付ラベルを添える
+    function vmark(ym, color, label) {
       for (var j = 0; j < n; j++) {
-        if (rows[j].ym === res.fireDate) {
-          ctx.strokeStyle = "#2e7d32"; ctx.setLineDash([4, 3]); ctx.beginPath();
-          ctx.moveTo(X(j), padT); ctx.lineTo(X(j), H - padB); ctx.stroke();
-          ctx.setLineDash([]); break;
+        if (rows[j].ym === ym) {
+          var vx = X(j);
+          ctx.strokeStyle = color; ctx.setLineDash([4, 3]);
+          ctx.beginPath(); ctx.moveTo(vx, padT); ctx.lineTo(vx, H - padB); ctx.stroke();
+          ctx.setLineDash([]);
+          ctx.fillStyle = color; ctx.font = "11px sans-serif";
+          var right = vx > W - 96;
+          ctx.textAlign = right ? "right" : "left"; ctx.textBaseline = "top";
+          ctx.fillText(label, vx + (right ? -4 : 4), padT + 1);
+          return;
         }
+      }
+    }
+    if (res.fireDate) vmark(res.fireDate, "#2e7d32", "FIRE可能 " + res.fireDate);
+    if (res.depletionMonth) vmark(res.depletionMonth, "#c62828", "資産枯渇 " + res.depletionMonth);
+
+    // ホバー：ガイド線＋データ点
+    if (hoverIdx >= 0 && hoverIdx < n) {
+      var hx = X(hoverIdx), rr = rows[hoverIdx];
+      ctx.strokeStyle = "#9e9e9e"; ctx.setLineDash([2, 2]);
+      ctx.beginPath(); ctx.moveTo(hx, padT); ctx.lineTo(hx, H - padB); ctx.stroke();
+      ctx.setLineDash([]);
+      ctx.fillStyle = "#1565c0";
+      ctx.beginPath(); ctx.arc(hx, Y(rr.endAssets), 3.5, 0, 7); ctx.fill();
+      if (rr.fireNeed != null) {
+        ctx.fillStyle = "#e65100";
+        ctx.beginPath(); ctx.arc(hx, Y(rr.fireNeed), 3.5, 0, 7); ctx.fill();
       }
     }
   }
 
+  function moveTip(evt) {
+    if (!lastRes || !layout) return;
+    var rect = canvas.getBoundingClientRect();
+    var pt = evt.touches ? evt.touches[0] : evt;
+    var mx = pt.clientX - rect.left;
+    var n = layout.n;
+    var frac = (mx - layout.padL) / (layout.W - layout.padL - layout.padR);
+    var i = Math.round(frac * (n - 1));
+    if (i < 0) i = 0; if (i > n - 1) i = n - 1;
+    if (i !== hoverIdx) { hoverIdx = i; draw(lastRes); }
+    var r = lastRes.monthly[i];
+    tip.style.display = "block";
+    tip.innerHTML = "<b>" + r.ym + "</b>（本人 " + r.ageSelf + "歳）<br>" +
+      "期末資産 " + yen(r.endAssets) + "<br>" +
+      "FIRE必要 " + (r.fireNeed == null ? "—" : yen(r.fireNeed));
+    var tw = tip.offsetWidth || 150;
+    var tx = pt.clientX - rect.left + 14;
+    var ty = pt.clientY - rect.top + 14;
+    if (tx + tw > layout.W) tx = layout.W - tw - 4;
+    tip.style.left = tx + "px";
+    tip.style.top = ty + "px";
+  }
+  function hideTip() {
+    if (hoverIdx === -1) return;
+    hoverIdx = -1; tip.style.display = "none";
+    if (lastRes) draw(lastRes);
+  }
+  canvas.addEventListener("mousemove", moveTip);
+  canvas.addEventListener("mouseleave", hideTip);
+  canvas.addEventListener("touchstart", moveTip, { passive: true });
+  canvas.addEventListener("touchmove", moveTip, { passive: true });
+
   function headline(res) {
     var el = document.getElementById("headline");
     if (res.fireDate) {
-      el.className = "headline";
+      el.className = res.endAssetsAtSimEnd < 0 ? "headline warn" : "headline";
       el.textContent = "FIRE可能時期: " + res.fireDate +
         "（本人 " + res.ageAtFire + "歳）　終了年齢資産: " +
-        yen(res.endAssetsAtSimEnd) + "（" + res.verdict + "）";
+        yen(res.endAssetsAtSimEnd) + "（" + res.verdict + "）" +
+        (res.endAssetsAtSimEnd < 0
+          ? "　※この時期に退職すれば年金のみで目標年齢まで持つ計算。現行の"
+            + "リタイア予定日まで就労を続ける前提だと終了資産はマイナス。"
+          : "");
     } else {
       el.className = "headline warn";
       el.textContent = "現状の設定では目標年齢までに FIRE 必要資産へ到達しません" +
@@ -155,6 +271,7 @@ var PROFILE = "__PROFILE_DEFAULT__";
 
   function recompute() {
     var res = simulate(params);
+    lastRes = res;
     draw(res); headline(res); dumpTable(res);
   }
 
@@ -193,6 +310,13 @@ var PROFILE = "__PROFILE_DEFAULT__";
     var d = document.getElementById("dbg");
     d.style.display = d.style.display === "block" ? "none" : "block";
   });
+
+  // ウィンドウ/レイアウト幅の変化でグラフを再描画（スマホ回転・分割表示）
+  if (window.ResizeObserver) {
+    new ResizeObserver(function () { if (lastRes) draw(lastRes); }).observe(canvas);
+  } else {
+    window.addEventListener("resize", function () { if (lastRes) draw(lastRes); });
+  }
 
   renderSliders();
   recompute();
