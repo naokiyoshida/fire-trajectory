@@ -21,12 +21,12 @@ import { config as loadDotenv } from "dotenv";
 import { loadConfig, requireSheetsConfig } from "../app/core/config.js";
 import { createSheetsClient, quoteSheetName } from "../app/core/sheets-client.js";
 import { DATABASE_SHEET_NAME } from "../app/pipeline/sync-transactions.js";
+import { rowNaturalKey } from "../app/pipeline/transaction-rows.js";
 
 loadDotenv();
 
-const normAmount = (s: string): string => s.replace(/[¥,円\s]/g, "");
-const keyOf = (r: string[]): string =>
-  `${String(r[1] ?? "")}|${String(r[2] ?? "")}|${normAmount(String(r[3] ?? ""))}|${String(r[4] ?? "")}`;
+// 自然キー正規化は doctor と共有（app/pipeline/transaction-rows.ts）。
+const keyOf = rowNaturalKey;
 
 async function main(): Promise<void> {
   const dryRun = process.argv.includes("--dry-run");

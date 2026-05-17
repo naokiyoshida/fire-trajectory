@@ -16,9 +16,16 @@ async function main(): Promise<void> {
     case "sync": {
       const dryRun = process.argv.includes("--dry-run");
       const fullSync = process.argv.includes("--full");
+      const peekExisting = process.argv.includes("--peek");
+      const forceAppend = process.argv.includes("--force");
       const { syncTransactions } = await import("./pipeline/sync-transactions.js");
       const { syncAssets } = await import("./pipeline/sync-assets.js");
-      const tx = await syncTransactions({ dryRun, fullSync });
+      const tx = await syncTransactions({
+        dryRun,
+        fullSync,
+        peekExisting,
+        forceAppend,
+      });
       logger.info(
         `syncTransactions: scraped=${tx.scraped}, unique=${tx.unique}, appended=${tx.appended}, months=${tx.monthsScanned}, fullMode=${tx.fullMode}`,
       );
@@ -39,8 +46,15 @@ async function main(): Promise<void> {
     case "sync-transactions": {
       const dryRun = process.argv.includes("--dry-run");
       const fullSync = process.argv.includes("--full");
+      const peekExisting = process.argv.includes("--peek");
+      const forceAppend = process.argv.includes("--force");
       const { syncTransactions } = await import("./pipeline/sync-transactions.js");
-      const result = await syncTransactions({ dryRun, fullSync });
+      const result = await syncTransactions({
+        dryRun,
+        fullSync,
+        peekExisting,
+        forceAppend,
+      });
       logger.info(
         `syncTransactions done: scraped=${result.scraped}, unique=${result.unique}, appended=${result.appended}, months=${result.monthsScanned}, fullMode=${result.fullMode}`,
       );
@@ -94,6 +108,12 @@ async function main(): Promise<void> {
       }
       break;
     }
+    case "doctor": {
+      const { runDoctor } = await import("./pipeline/diagnose-transactions.js");
+      const code = await runDoctor();
+      process.exit(code);
+      break;
+    }
     case "snapshot-assets": {
       const { saveAssetsPageSnapshot } = await import("./scrapers/assets/debug.js");
       const path = await saveAssetsPageSnapshot();
@@ -114,7 +134,7 @@ async function main(): Promise<void> {
     }
     default: {
       console.error(
-        "Usage: tsx app/cli.ts <sync|sync-transactions|sync-assets|login|check-session|notify|health-check>",
+        "Usage: tsx app/cli.ts <sync|sync-transactions|sync-assets|login|check-session|notify|health-check|doctor>",
       );
       process.exit(1);
     }

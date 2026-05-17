@@ -21,6 +21,7 @@ import {
   type Transaction,
 } from "../scrapers/transactions/schema.js";
 import { dedupeById, toTransactions } from "../scrapers/transactions/transformer.js";
+import { assessAppendSafety } from "./append-guard.js";
 
 export const DATABASE_SHEET_NAME = "取引履歴";
 export const DATABASE_HEADERS = [
@@ -36,6 +37,10 @@ export const DATABASE_HEADERS = [
 export interface SyncTransactionsOptions {
   dryRun?: boolean;
   fullSync?: boolean;
+  /** dry-run でも既存IDを読み、真の新規件数を出す（書き込みは一切しない）。 */
+  peekExisting?: boolean;
+  /** 追記前ガードを無視して強制追記する（正当な大量差分のとき）。 */
+  forceAppend?: boolean;
 }
 
 export interface SyncTransactionsResult {
@@ -79,11 +84,15 @@ export async function syncTransactions(
   const config = loadConfig();
   const dryRun = options.dryRun ?? false;
   const fullSync = options.fullSync ?? false;
+  const peekExisting = options.peekExisting ?? false;
+  const forceAppend = options.forceAppend ?? false;
+  // 既存IDを読むか: 通常実行は常に、dry-run は peek 指定時のみ（書き込みは別途禁止）。
+  const loadExisting = !dryRun || peekExisting;
 
   let sheets: SheetsClient | null = null;
   let existingIds = new Set<string>();
 
-  if (dryRun) {
+  if (!loadExisting) {
     logger.info("Dry run: Sheets I/O is skipped");
   } else {
     const sheetsConfig = requireSheetsConfig(config);
@@ -91,10 +100,14 @@ export async function syncTransactions(
       sheetsConfig.sheetId,
       sheetsConfig.serviceAccountJson,
     );
-    await ensureSheet(sheets, DATABASE_SHEET_NAME, DATABASE_HEADERS);
+    // peek は読み取り専用に徹する（ensureSheet はヘッダ未設定時に書き込むため除外）。
+    if (!dryRun) {
+      await ensureSheet(sheets, DATABASE_SHEET_NAME, DATABASE_HEADERS);
+    }
     existingIds = new Set(await readColumnValues(sheets, DATABASE_SHEET_NAME, "A"));
     logger.info(
-      `Loaded ${existingIds.size} existing transaction IDs from ${DATABASE_SHEET_NAME}`,
+      `Loaded ${existingIds.size} existing transaction IDs from ${DATABASE_SHEET_NAME}` +
+        (dryRun ? " (peek: 読み取り専用)" : ""),
     );
   }
 
@@ -185,14 +198,34 @@ export async function syncTransactions(
 
   let appendedCount = 0;
   if (dryRun) {
-    const sample = unique.slice(0, 3);
-    logger.info(`Dry run: would append ${unique.length} transactions. Sample (up to 3):`);
-    for (const t of sample) {
+    const target = peekExisting ? fresh : unique;
+    logger.info(
+      peekExisting
+        ? `Dry run (peek): 既存 ${existingIds.size} 件と照合 → 真の新規 ${fresh.length} 件。Sample (up to 3):`
+        : `Dry run: would append ${unique.length} transactions（既存未照合）. Sample (up to 3):`,
+    );
+    for (const t of target.slice(0, 3)) {
       logger.info(
         `  ${t.date} | ${t.content} | ${t.amount} | ${t.source} | ${t.category}`,
       );
     }
   } else if (fresh.length > 0 && sheets) {
+    const guard = assessAppendSafety({
+      fullMode,
+      hadExistingIds: existingIds.size > 0,
+      uniqueCount: unique.length,
+      freshCount: fresh.length,
+    });
+    if (!guard.safe && !forceAppend) {
+      throw new ScrapingError(`追記前ガード中止: ${guard.message}`, "sink", {
+        uniqueCount: unique.length,
+        freshCount: fresh.length,
+        ratio: guard.ratio,
+      });
+    }
+    if (!guard.safe) {
+      logger.warn(`追記前ガード警告（--force で続行）: ${guard.message}`);
+    }
     const now = new Date().toISOString();
     const rows = fresh.map((t) => [
       t.id,

@@ -239,6 +239,22 @@ npm run dedupe-rows
 
 手動でも `npm run health-check` で同じ判定を確認できます。`Session valid` チェック（9.1）と合わせて、無人運用の沈黙故障を早期に可視化します。
 
+### 9.6 シート整合性の一括診断（`npm run doctor`）と追記前ガード
+
+ID 方式の不整合（remap-ids 級の事故）を疑ったら、まず **`npm run doctor`**（読み取り専用・書き込みなし）。1コマンドで以下を出力します:
+
+- 総行数
+- A列の重複ID（種別数・行数・サンプル / **本来0**）
+- 旧 run 重複行数（`dedupe-rows` 対象）
+- **最新 run の「保存ID vs 現行 transformer 再計算ID」一致率**（`423/423 一致 (100%)` 等。100%未満なら次回 sync が二重追記する恐れ＝方式不整合のサイン）
+- 最終 sync の health 判定
+
+異常時は終了コード非0（重複ID=4 / 最新 run 不一致=5）。**症状の自己診断はこれを実行して出力を見るだけで足ります**（使い捨て調査スクリプトは不要）。
+
+**`npm run sync:peek`**（= `sync-transactions --dry-run --peek`）は、既存IDを読むが**書き込みは一切しない**ドライランで、「次の sync は何件追記するか」の**真の件数**を出します（通常の `sync:dry` はフルモードで既存照合をしないため常に全件表示になり、この用途には使えません）。
+
+**追記前ガード**: 通常の `npm run sync` は、増分モードで「走査ユニークの過半数（かつ50件以上）が新規」になると、サイレント二重追記をせず `ScrapingError: 追記前ガード中止 …` で停止します（remap-ids 事故の再発防止）。正当な大量差分（長期停止後など）と確認できたら `npm run sync -- --force` で続行できます。
+
 ## 10. 開発時のコマンド
 
 ```powershell
@@ -252,13 +268,16 @@ npm run test:watch
 # 直近 sync の健全性チェック（鮮度・追記件数・成否）
 npm run health-check
 
+# 取引履歴シートの一括診断（読み取り専用・§9.6）。異常時 exit 非0
+npm run doctor
+
 # ハッシュ方式変更後の重複解消（§8.6、再 sync 後に一度きり）
 npm run dedupe-rows -- --dry-run
 npm run dedupe-rows
 
 # 個別 sync (デバッグ用)
-npm run sync-transactions:dry  # 取引のみドライラン
-npm run sync-assets:dry        # 資産のみドライラン
+npm run sync:peek             # 既存照合あり・書き込みなしで真の新規件数を確認（§9.6）
+npm run sync-assets:dry       # 資産のみドライラン
 
 # 任意のページの HTML スナップショット
 npx tsx app/cli.ts snapshot https://moneyforward.com/<path> <label>

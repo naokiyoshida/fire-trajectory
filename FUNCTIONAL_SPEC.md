@@ -292,7 +292,7 @@ GAS の `setupReports()` が QUERY 関数ベースで構築。データはすべ
 ## 6. 設計原則
 
 ### MUST
-- 既存の取引・資産データを破壊しない（重複排除と冪等性で担保）
+- 既存の取引・資産データを破壊しない（重複排除と冪等性で担保。さらに追記前ガードが「増分なのに過半数新規」を検知して二重追記前に停止し、`npm run doctor` で保存ID vs 現行方式の整合を随時検証できる）
 - 失敗時にユーザーに気づける形で通知（数ヶ月空白を防ぐ）
 - 取得項目の小計と合計の整合性を検証（zod refine）
 
@@ -311,7 +311,7 @@ GAS の `setupReports()` が QUERY 関数ベースで構築。データはすべ
 
 ## 7. テスト戦略
 
-vitest による純関数ユニットテスト 35本:
+vitest による純関数ユニットテスト 74本:
 - `tests/scrapers/transactions/transformer.test.ts`: SHA256 ID 生成、category 非依存、occurrence 採番、重複排除
 - `tests/scrapers/transactions/extractor.test.ts`: 金額クリーニング、日付パース
 - `tests/scrapers/transactions/navigator.test.ts`: 月送りロジック、ヘッダー判定
@@ -319,10 +319,15 @@ vitest による純関数ユニットテスト 35本:
 - `tests/scrapers/assets/transformer.test.ts`: scraped + manual の合算
 - `tests/auth/session.test.ts`: ログインURL判定
 - `tests/core/sheets-client.test.ts`: 列番号変換、シート名引用 (`quoteSheetName`)
+- `tests/core/sync-status.test.ts`: health 判定（鮮度・追記0・成否）
 - `tests/pipeline/sync-transactions.test.ts`: Full Sync の月数計算
+- `tests/pipeline/append-guard.test.ts`: 追記前ガード（増分で過半数新規＝二重追記疑いを中止）
+- `tests/pipeline/diagnose-transactions.test.ts`: `doctor` 診断（重複ID・旧 run 重複・最新 run の保存ID vs 再計算ID 一致率）
 
 ブラウザ操作・Sheets API は実機ドライランで検証:
 - `npm run sync:dry`: ブラウザを起動してスクレイピングのみ、Sheets 書き込みなし
+- `npm run sync:peek`: 既存IDを照合し書き込みなしで「真の新規件数」を確認（増分の事前検証）
+- `npm run doctor`: シートを読み取り専用で一括診断（重複ID/旧 run 重複/最新 run ID 整合/health）。異常時 exit 非0
 - `npm run check-session`: ヘッドレスで取引ページに到達できるか
 
 ---
