@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { fireNeedValue } from "../../app/gas/formula-builders.js";
+import { fireNeedValue } from "../../app/gas/contract.js";
 import { simulate, type SimParams } from "../../app/sim/engine.js";
 
 // 検証しやすいよう inflation=0 / nominalYield=0（rm=0, deflator=1）の

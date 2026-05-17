@@ -6,7 +6,7 @@
  * import を持たない（Date/Math のみ）ので、render-html.ts が
  * ts.transpileModule で単一ファイル JS 化してブラウザにそのまま載せられる。
  *
- * I列の逆算式は app/gas/formula-builders.ts: fireNeedValue と同一の算術:
+ * I列の逆算式は app/gas/contract.ts: fireNeedValue と同一の算術:
  *   I(r) = nextReq/(1+月次実質利回り) − 年金実質(r) + 支出実質(r)
  * 同一性は tests/sim/engine.test.ts が fireNeedValue と数値比較して固定する。
  *

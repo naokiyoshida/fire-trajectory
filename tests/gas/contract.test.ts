@@ -2,21 +2,17 @@ import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import {
   dashLookup,
-  fireNeedFormula,
   fireNeedValue,
   LEGACY_DISCARDED_DASHBOARD_KEYS,
-  lumpIncomeFormula,
-  pensionIncomeFormula,
   quoteSheetNameForFormula,
-  realDeflator,
-} from "../../app/gas/formula-builders.js";
+} from "../../app/gas/contract.js";
 
 const GAS_SRC = readFileSync(
   new URL("../../src/gas_receiver_service.gs", import.meta.url),
   "utf8",
 );
 
-describe("formula-builders (canonical spec)", () => {
+describe("gas contract (canonical spec)", () => {
   it("quoteSheetNameForFormula escapes single quotes", () => {
     expect(quoteSheetNameForFormula("設定")).toBe("'設定'");
     expect(quoteSheetNameForFormula("a'b")).toBe("'a''b'");
@@ -26,47 +22,6 @@ describe("formula-builders (canonical spec)", () => {
     expect(dashLookup("'設定'", "基本生活費_月額")).toBe(
       `INDEX('設定'!$B:$B, MATCH("基本生活費_月額", '設定'!$A:$A, 0))`,
     );
-  });
-
-  it("realDeflator compounds inflation over elapsed months", () => {
-    expect(realDeflator("設定!$B$23", 24)).toBe("(1+設定!$B$23)^(24/12)");
-    expect(realDeflator("INF", 0)).toBe("(1+INF)^(0/12)");
-  });
-
-  it("pensionIncomeFormula deflates nominal annual pension to real", () => {
-    expect(
-      pensionIncomeFormula({
-        dateRef: "$A5",
-        startRef: "EDATE(BD,12*65)",
-        pensionAnnualRef: "PEN",
-        deflator: "DEF",
-      }),
-    ).toBe("IF($A5 >= EDATE(BD,12*65), (PEN/12)/DEF, 0)");
-  });
-
-  it("lumpIncomeFormula deflates a one-off nominal lump to real", () => {
-    expect(
-      lumpIncomeFormula({
-        dateRef: "$A5",
-        eventDateRef: "RD",
-        lumpRef: "LUMP",
-        deflator: "DEF",
-      }),
-    ).toBe('IF(TEXT($A5,"yyyyMM")=TEXT(RD,"yyyyMM"), LUMP/DEF, 0)');
-  });
-
-  it("fireNeedFormula builds the backward-recursion cell (real-deflated expense)", () => {
-    expect(
-      fireNeedFormula({
-        rowIdx: 5,
-        ageCol: "B",
-        targetAgeRef: "TGT",
-        nextReq: "NR",
-        yieldCol: "G",
-        niExpr: "(NI)",
-        expenseExpr: "(E5/RD)",
-      }),
-    ).toBe('=IF(B5 > TGT, "", (NR)/(1+G5) - (NI) + (E5/RD))');
   });
 
   it("fireNeedValue matches the hand-computed backward recursion", () => {
@@ -113,10 +68,10 @@ describe("formula-builders (canonical spec)", () => {
   });
 });
 
-// 契約テスト: .gs 側に残る共通ヘルパ／移行ロジックが本モジュールの正準
-// 仕様と一致しているか（シミュレーション数式は engine.ts が唯一の正へ移行
-// したため契約対象外。GAS シミュは撤去済み §4.5）。
-describe("gas_receiver_service.gs ↔ formula-builders contract", () => {
+// 契約テスト: .gs に残る共通ヘルパ／旧キー移行が本モジュールの正準仕様と
+// 一致しているか（シミュレーション数式は engine.ts が唯一の正へ移行済み・
+// GAS シミュは撤去済み §4.5 なので契約対象外）。
+describe("gas_receiver_service.gs ↔ contract", () => {
   it("dashLookup_ template matches dashLookup()", () => {
     expect(GAS_SRC).toContain(
       "return 'INDEX(' + dashRef + '!$B:$B, MATCH(\"' + key + '\", ' + dashRef + '!$A:$A, 0))';",
