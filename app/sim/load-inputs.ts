@@ -56,7 +56,12 @@ const MAP: ReadonlyArray<
 
 function toNum(v: unknown): number {
   if (typeof v === "number") return v;
-  const n = Number(String(v ?? "").replace(/[^\d.\-]/g, ""));
+  // NFKC で全角数字（０-９）・全角記号（￥，）等を半角化してから不要記号を除去。
+  // これを怠ると全角金額が Number("")→0 に黙って化け、資産/月収が 0 になる。
+  const s = String(v ?? "")
+    .normalize("NFKC")
+    .replace(/[−ー]/g, "-"); // 全角マイナス/長音→ASCII ハイフン
+  const n = Number(s.replace(/[^\d.\-]/g, ""));
   return Number.isFinite(n) ? n : 0;
 }
 
@@ -73,7 +78,11 @@ function toIsoDate(v: unknown): string {
   return `${y}-${String(m).padStart(2, "0")}-${String(d).padStart(2, "0")}`;
 }
 
-/** asOf（実行月の月初）を "YYYY-MM-01" で返す。 */
+/**
+ * asOf（実行月の月初）を "YYYY-MM-01" で返す。
+ * ローカル時刻の年月を意図的に使う（本ツールは JST 単一マシン運用。
+ * UTC 化すると月末深夜に翌月へ先送りされ実行月がずれるため不可）。
+ */
 export function todayAsOf(now = new Date()): string {
   const y = now.getFullYear();
   const m = now.getMonth() + 1;

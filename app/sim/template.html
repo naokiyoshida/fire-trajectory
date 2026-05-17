@@ -261,11 +261,12 @@ var PROFILE = "__PROFILE_DEFAULT__";
   }
 
   function dumpTable(res) {
-    var lines = ["年月\t本人\t期首\t収入\t支出\t収支\t期末\tFIRE必要"];
+    var lines = ["年月\t本人\t期首\t収入\t支出\t収支\t期末\tFIRE必要\t実質係数\t年金実質"];
     res.monthly.forEach(function (r) {
       lines.push([r.ym, r.ageSelf, Math.round(r.openAssets), Math.round(r.income),
         Math.round(r.expense), Math.round(r.net), Math.round(r.endAssets),
-        r.fireNeed == null ? "" : Math.round(r.fireNeed)].join("\t"));
+        r.fireNeed == null ? "" : Math.round(r.fireNeed),
+        r.deflator.toFixed(4), Math.round(r.pensionReal)].join("\t"));
     });
     document.getElementById("dbg").textContent = lines.join("\n");
   }

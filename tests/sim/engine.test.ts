@@ -137,3 +137,62 @@ describe("simulate: 枯渇シナリオ", () => {
     expect(r.endAssetsAtSimEnd).toBe(-1_900_000); // 2,000,000 − 300,000×13
   });
 });
+
+// ageAt の「誕生日の日が2日以降なら誕生月の1日時点ではまだ加齢しない」
+// （GAS DATEDIF 契約）。これを落とすと年金開始が1ヶ月早まり ¥523K 規模の
+// パリティ乖離を生んだ実バグ経路。決定的に固定する。
+describe("simulate: ageAt 誕生日の日 > 1 の年金開始境界", () => {
+  const r = simulate({
+    ...P,
+    selfBirth: "1977-03-09",
+    selfPensionAnnual: 1_800_000, // 月15万
+    selfPensionStartAge: 65,
+    spousePensionStartAge: 100,
+    inflation: 0,
+    nominalYield: 0,
+    simEndAge: 70,
+    fireTargetAge: 70,
+  });
+  const at = (ym: string) => r.monthly.find((m) => m.ym === ym);
+
+  it("2042/03 はまだ64歳・年金ゼロ、2042/04 で65歳・年金15万", () => {
+    expect(at("2042/03")?.ageSelf).toBe(64);
+    expect(at("2042/03")?.pensionReal).toBe(0);
+    expect(at("2042/04")?.ageSelf).toBe(65);
+    expect(at("2042/04")?.pensionReal).toBe(150_000);
+  });
+});
+
+describe("simulate: verdict 閾値（fireEndAssets=3,750,000 を各帯へ）", () => {
+  it("盤石: fireEndAssets ≥ 盤石閾値", () => {
+    const r = simulate({ ...P, fireSolidThreshold: 3_000_000, fireComfortThreshold: 1_000_000 });
+    expect(r.fireEndAssets).toBe(3_750_000);
+    expect(r.verdict).toBe("盤石");
+  });
+  it("余裕: 余裕閾値 ≤ fireEndAssets < 盤石閾値", () => {
+    const r = simulate({ ...P, fireSolidThreshold: 5_000_000, fireComfortThreshold: 3_000_000 });
+    expect(r.verdict).toBe("余裕");
+  });
+  it("達成: 0 ≤ fireEndAssets < 余裕閾値", () => {
+    expect(simulate(P).verdict).toBe("達成"); // 既定しきい値 1億/5千万
+  });
+});
+
+describe("simulate: フィッシャー実質利回り（名目>0・インフレ>0）", () => {
+  const r = simulate({ ...P, nominalYield: 0.05, inflation: 0.02 });
+  const rmExpected = Math.pow(1.05 / 1.02, 1 / 12) - 1;
+
+  it("realMonthlyYield = ((1+n)/(1+i))^(1/12)−1", () => {
+    expect(r.monthly[0]?.realMonthlyYield).toBeCloseTo(rmExpected, 12);
+  });
+  it("deflator は (1+i)^(t/12)（t=12 で 1.02）", () => {
+    expect(r.monthly[12]?.deflator).toBeCloseTo(1.02, 10);
+  });
+  it("資産漸化式 P_t=(P_{t-1}+net)(1+rm) が成立", () => {
+    const m0 = r.monthly[0];
+    expect(m0?.endAssets).toBeCloseTo(
+      ((m0?.openAssets ?? 0) + (m0?.net ?? 0)) * (1 + rmExpected),
+      4,
+    );
+  });
+});

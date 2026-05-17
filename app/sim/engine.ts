@@ -69,6 +69,10 @@ export interface SimMonth {
   endAssets: number;
   /** FIRE必要資産（目標年齢超は null） */
   fireNeed: number | null;
+  /** インフレ実質割戻し係数 (1+i)^(t/12)。デバッグ自己診断用に保持 */
+  deflator: number;
+  /** 実質割戻し済みの年金月額（本人＋配偶者）。デバッグ自己診断用に保持 */
+  pensionReal: number;
 }
 
 export interface SimResult {
@@ -212,6 +216,8 @@ export function simulate(p: SimParams): SimResult {
       realMonthlyYield: rm,
       endAssets,
       fireNeed: null,
+      deflator,
+      pensionReal,
     });
     pensionRealArr.push(pensionReal);
     // §4.3 自己整合: I列は「この月に退職した」前提なので退職後社会保険料は
