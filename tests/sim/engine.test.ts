@@ -50,24 +50,24 @@ describe("simulate", () => {
     expect(m[0]?.realMonthlyYield).toBeCloseTo(0, 12);
   });
 
-  it("収入: リタイア前は給与、リタイア月は一時金、以降ゼロ", () => {
+  it("収入: リタイア月まで給与あり＋同月に一時金、翌月以降ゼロ", () => {
     expect(m[0]?.income).toBe(300_000); // t=0 就労
     expect(m[11]?.income).toBe(300_000); // t=11 まだ就労
-    expect(m[12]?.income).toBe(1_000_000); // t=12 リタイア月=一時金
-    expect(m[13]?.income).toBe(0); // 以降ゼロ
+    expect(m[12]?.income).toBe(1_300_000); // t=12 リタイア月=給与+一時金
+    expect(m[13]?.income).toBe(0); // 翌月以降ゼロ
   });
 
-  it("支出: 基本生活費＋リタイア後に社会保険料を加算", () => {
+  it("支出: 基本生活費＋リタイア翌月以降に社会保険料を加算", () => {
     expect(m[0]?.expense).toBe(200_000);
-    expect(m[12]?.expense).toBe(250_000);
-    expect(m[24]?.expense).toBe(250_000);
+    expect(m[12]?.expense).toBe(200_000); // リタイア月は就労扱い→保険料なし
+    expect(m[24]?.expense).toBe(250_000); // 翌月以降は +50,000
   });
 
   it("資産は P_t=(P_{t-1}+net)(1+rm) で更新（rm=0）", () => {
     expect(m[0]?.endAssets).toBe(10_100_000); // +100,000
     expect(m[11]?.endAssets).toBe(11_200_000); // 12ヶ月×+100,000
-    expect(m[12]?.endAssets).toBe(11_950_000); // +750,000
-    expect(m[24]?.endAssets).toBe(8_950_000); // 以降 -250,000×12
+    expect(m[12]?.endAssets).toBe(12_300_000); // +1,100,000(給与+一時金-基本)
+    expect(m[24]?.endAssets).toBe(9_300_000); // 以降 -250,000×12
   });
 
   it("I列末尾は fireNeedValue と一致（数式の単一の正を固定）", () => {
@@ -87,7 +87,7 @@ describe("simulate", () => {
     expect(r.fireDate).toBe("2026/01");
     expect(r.ageAtFire).toBe(46);
     expect(r.depletionMonth).toBeNull();
-    expect(r.endAssetsAtSimEnd).toBe(8_950_000);
+    expect(r.endAssetsAtSimEnd).toBe(9_300_000);
     expect(r.verdict).toBe("達成");
   });
 

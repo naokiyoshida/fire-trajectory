@@ -97,15 +97,17 @@ function ymLabel(idx: number): string {
   return `${y}/${String(m).padStart(2, "0")}`;
 }
 
-/** 誕生日と対象月初から満年齢（その月の1日時点）。 */
+/**
+ * 誕生日と対象年月から満年齢。月次モデルなので「誕生月に達したら新年齢」
+ * （日割りしない）。例: 1977/03 生は 2042/03 で 65 歳（年金開始月）。
+ */
 function ageAt(
   birth: { y: number; m: number; d: number },
   y: number,
   m: number,
 ): number {
   let age = y - birth.y;
-  // その月の1日時点。誕生月をまだ迎えていなければ -1。
-  if (m < birth.m || (m === birth.m && 1 < birth.d)) age -= 1;
+  if (m < birth.m) age -= 1;
   return age;
 }
 
@@ -149,10 +151,12 @@ export function simulate(p: SimParams): SimResult {
     const deflator = Math.pow(1 + p.inflation, t / 12);
 
     // --- 収入（家計入金モデル）---
+    // リタイア予定日は月末日（例 2037/03/31）。その月までは就労なので
+    // 給与はリタイア月を含める（idx <= retireIdx）。退職一時金も同月に加算。
     let income = 0;
-    if (idx < selfRetireIdx)
+    if (idx <= selfRetireIdx)
       income += p.selfMonthlyIncome + p.selfBonusAnnual / 12;
-    if (idx < spouseRetireIdx)
+    if (idx <= spouseRetireIdx)
       income += p.spouseMonthlyIncome + p.spouseBonusAnnual / 12;
 
     let pensionReal = 0;
@@ -169,7 +173,8 @@ export function simulate(p: SimParams): SimResult {
     let expense = p.baseLivingMonthly;
     if (idx <= loanEndIdx) expense += p.loanMonthly;
     if (idx <= childEndIdx) expense += p.childSupportMonthly;
-    if (idx >= selfRetireIdx) expense += p.postRetireInsuranceMonthly;
+    // リタイア月は就労（給与あり）なので社会保険料は翌月以降に加算する。
+    if (idx > selfRetireIdx) expense += p.postRetireInsuranceMonthly;
 
     const net = income - expense;
     const openAssets = prevEnd;
