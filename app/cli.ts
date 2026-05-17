@@ -40,6 +40,16 @@ async function main(): Promise<void> {
           command: "sync",
           appended: tx.appended,
         });
+        // 最新データで FIRE シミュレーション HTML を再生成（best-effort:
+        // 失敗しても sync 本体は成功扱いのまま）。
+        try {
+          const { runSim } = await import("./sim/run.js");
+          await runSim();
+        } catch (simErr: unknown) {
+          logger.warn("シミュレーション HTML 生成に失敗（sync は成功）", {
+            error: String(simErr),
+          });
+        }
       }
       break;
     }
@@ -114,6 +124,13 @@ async function main(): Promise<void> {
       process.exit(code);
       break;
     }
+    case "sim": {
+      const check = process.argv.includes("--check");
+      const { runSim } = await import("./sim/run.js");
+      const code = await runSim({ check });
+      process.exit(code);
+      break;
+    }
     case "snapshot-assets": {
       const { saveAssetsPageSnapshot } = await import("./scrapers/assets/debug.js");
       const path = await saveAssetsPageSnapshot();
@@ -134,7 +151,7 @@ async function main(): Promise<void> {
     }
     default: {
       console.error(
-        "Usage: tsx app/cli.ts <sync|sync-transactions|sync-assets|login|check-session|notify|health-check|doctor>",
+        "Usage: tsx app/cli.ts <sync|sync-transactions|sync-assets|login|check-session|notify|health-check|doctor|sim>",
       );
       process.exit(1);
     }

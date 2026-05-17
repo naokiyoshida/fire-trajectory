@@ -257,6 +257,69 @@ GAS の `setupReports()` が QUERY 関数ベースで構築。データはすべ
 - 予想資産(H) が この必要ライン(I) を初めて上回る月 = **FIRE可能時期**。
   `FIRE射程` シートに時期と本人年齢を表示し、グラフで2本の交点として可視化。
 
+### 4.4 シミュレーションエンジン抽出とインタラクティブ HTML
+
+**目的**: 設定シートとシミュレーションシートを往復せず、スライダーで設定を
+動かすと「期末資産 vs FIRE必要資産」グラフと FIRE 可能時期が即時に追従する
+1画面 UI を提供する。計算ロジックを**スプレッドシート数式から純粋関数へ抽出**
+し、表示はローカル生成 HTML（`file://`、完全プライベート・認証/ホスト不要）。
+
+**構成**:
+- `app/sim/engine.ts`: `simulate(params: SimParams): SimResult` の**唯一の正**。
+  §4.1〜4.3 の数式（フィッシャー実質利回り・ライフイベント CF・I列逆算）を
+  TS 純粋関数で実装。`import` ゼロ（Date/Math のみ）で完全自己完結。既存
+  `app/gas/formula-builders.ts` の `fireNeedValue` を内包し I列を再利用。
+- `app/sim/load-inputs.ts`: 設定シートを項目名→値で読み（読み取り専用）、
+  `現在の資産`（資産推移 最新の数式結果）も含めて `SimParams` を組む。
+- `app/sim/render-html.ts`: engine.ts のソースを **`typescript` の
+  `ts.transpileModule` で単一ファイル JS 化**（新規依存なし・バンドラ不要・
+  ロジック二重化なし＝ドリフト不能）し、入力 `PARAMS` とスライダー定義
+  `SLIDERS` と共に `dist/fire.html` へインライン。グラフは依存を増やさない
+  ため**手描き Canvas**（2本線＋交点マーカー＋見出し）。スライダー操作の
+  再計算は全期間ブラウザ内 JS で完結（サーバ往復なし）。
+- CLI: `npm run sim`（読み取り専用で `dist/fire.html` 生成、`dist/` は
+  gitignore）。`npm run sync` 末尾でも best-effort 生成（失敗しても sync は
+  落とさない）。
+
+**フル精度＋プロファイル**: engine は常に**全 ~30 設定項目**で計算する。
+UI に出すスライダーは宣言的配列 `SLIDERS`（`key/label/min/max/step/unit/
+profile`）で定義し、`profile` で `detailed`(PC) と `simple`(将来スマホ) を
+出し分ける。露出していない項目は設定シートの値を既定として使う。**スライダーの
+追加・範囲変更・プロファイル変更は `SLIDERS` の1行編集のみ**（engine/UI の
+コード変更不要）。初期 PC プロファイルは高感度の約10項目
+（利回り・インフレ・基本生活費・各リタイア年・各年金開始年齢・本人月収/
+ボーナス・ローン/息子支援）。
+
+### 4.5 パリティ検証と Sheets シミュレーションの段階的廃止
+
+- `npm run sim -- --check`: engine の既定シナリオ出力と、現行 Sheets
+  シミュレーションシートの値を月次で突き合わせ、最大絶対差と最初の乖離行を
+  表示する（doctor と同じ「自己診断1コマンド」方針。使い捨て比較スクリプト
+  不要）。**この `--check` が「整合性 OK」の判定ゲートを兼ねる**。
+- パリティ確認が取れるまで Sheets シミュレーション/設定/集計は**併存**。
+  確認後、GAS の `setupSimulation()` と シミュレーションシート、FIRE射程の
+  シミュレーション依存部を撤去する（**段階的**。取引履歴・資産推移の蓄積
+  シートと、入力ストアである設定シートは残す）。撤去は別コミットで、
+  `--check` の合格ログを根拠として実施。
+
+### 4.6 保守性・デバッグ容易性・AI コスト最適化（設計原則）
+
+本機能は「修正・デバッグのたびに AI を多投する」事態を構造的に避ける:
+
+- **単一の正**: 数式は engine.ts の1箇所のみ。Sheets と HTML でロジックを
+  二重化しない（remap-ids 事故＝二重定義のドリフトを繰り返さない）。
+- **自己診断コマンド**: `npm run sim -- --check`（パリティ）と既存
+  `npm run doctor` 同様、異常はユーザーが1コマンド実行→要約貼付で足り、
+  AI の探索フェーズを省略できる。
+- **宣言的設定**: スライダー/プロファイル/設定マッピングはデータ駆動。
+  多くの「変更要望」はコード変更でなく config 1行で完結（ユーザー自身でも可）。
+- **決定的・オフライン・認証不要**: 再現性が高く、ホスティング/認証の
+  不確実性に起因するデバッグ往復が発生しない。
+- **シナリオ命名ユニットテスト**: ライフイベント規則ごとに名前付きテスト。
+  失敗時に壊れた規則がテスト名で即特定でき、ローカルで回帰を閉じる。
+- **HTML 内デバッグ出力**: 画面のトグルで月次表を貼り付け可能な形で
+  ダンプ。不具合時はユーザーが表を貼るだけで原因箇所を共有できる。
+
 ---
 
 ## 5. 認証・セキュリティ
@@ -311,7 +374,7 @@ GAS の `setupReports()` が QUERY 関数ベースで構築。データはすべ
 
 ## 7. テスト戦略
 
-vitest による純関数ユニットテスト 74本:
+vitest による純関数ユニットテスト 93本:
 - `tests/scrapers/transactions/transformer.test.ts`: SHA256 ID 生成、category 非依存、occurrence 採番、重複排除
 - `tests/scrapers/transactions/extractor.test.ts`: 金額クリーニング、日付パース
 - `tests/scrapers/transactions/navigator.test.ts`: 月送りロジック、ヘッダー判定
@@ -323,11 +386,17 @@ vitest による純関数ユニットテスト 74本:
 - `tests/pipeline/sync-transactions.test.ts`: Full Sync の月数計算
 - `tests/pipeline/append-guard.test.ts`: 追記前ガード（増分で過半数新規＝二重追記疑いを中止）
 - `tests/pipeline/diagnose-transactions.test.ts`: `doctor` 診断（重複ID・旧 run 重複・最新 run の保存ID vs 再計算ID 一致率）
+- `tests/sim/engine.test.ts`: シミュレーションエンジン（実質利回り・収支ゲート・資産漸化式・I列の fireNeedValue 一致・派生指標・決定性）
+- `tests/sim/load-inputs.test.ts`: 設定シート→SimParams（型別パース・任意項目の既定補完・必須欠落例外）
+- `tests/sim/render-html.test.ts`: engine の transpile（型/export 除去）とトークン置換
+- `tests/sim/parity.test.ts`: Sheets シミュレーションとの月次パリティ比較（許容・年月表記ゆれ）
 
 ブラウザ操作・Sheets API は実機ドライランで検証:
 - `npm run sync:dry`: ブラウザを起動してスクレイピングのみ、Sheets 書き込みなし
 - `npm run sync:peek`: 既存IDを照合し書き込みなしで「真の新規件数」を確認（増分の事前検証）
 - `npm run doctor`: シートを読み取り専用で一括診断（重複ID/旧 run 重複/最新 run ID 整合/health）。異常時 exit 非0
+- `npm run sim`: 設定シートを読み取り専用で取得し `dist/fire.html` を生成（インタラクティブ・オフライン）
+- `npm run sim -- --check`: engine と現行 Sheets シミュレーションを月次パリティ比較。乖離時 exit 6（Sheets 撤去ゲート）
 - `npm run check-session`: ヘッドレスで取引ページに到達できるか
 
 ---

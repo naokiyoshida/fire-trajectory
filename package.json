@@ -18,6 +18,8 @@
     "sync:dry": "tsx app/cli.ts sync --dry-run",
     "sync:peek": "tsx app/cli.ts sync-transactions --dry-run --peek",
     "doctor": "tsx app/cli.ts doctor",
+    "sim": "tsx app/cli.ts sim",
+    "sim:check": "tsx app/cli.ts sim --check",
     "sync:full": "tsx app/cli.ts sync --full",
     "sync:full:dry": "tsx app/cli.ts sync --full --dry-run",
     "sync-assets:dry": "tsx app/cli.ts sync-assets --dry-run",

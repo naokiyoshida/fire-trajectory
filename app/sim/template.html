@@ -1,0 +1,202 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>FIRE シミュレーション</title>
+<style>
+  :root { color-scheme: light dark; }
+  body { font-family: system-ui, sans-serif; margin: 0; padding: 16px; }
+  h1 { font-size: 18px; margin: 0 0 4px; }
+  .gen { color: #888; font-size: 12px; margin-bottom: 12px; }
+  .headline { font-size: 20px; font-weight: 700; padding: 10px 12px;
+    border-radius: 8px; background: #e1f5fe; margin-bottom: 12px; }
+  .headline.warn { background: #ffe0e0; }
+  .wrap { display: flex; flex-wrap: wrap; gap: 20px; align-items: flex-start; }
+  .panel { flex: 1 1 280px; min-width: 260px; }
+  .chartbox { flex: 2 1 520px; min-width: 300px; }
+  canvas { width: 100%; height: 360px; border: 1px solid #ccc; border-radius: 6px; }
+  .sld { margin: 10px 0; }
+  .sld label { display: flex; justify-content: space-between;
+    font-size: 13px; margin-bottom: 2px; }
+  .sld input[type=range] { width: 100%; }
+  .sld .val { font-variant-numeric: tabular-nums; font-weight: 600; }
+  .profiles { margin-bottom: 8px; font-size: 13px; }
+  .legend { font-size: 12px; margin-top: 6px; }
+  .legend .b { color: #1565c0; } .legend .o { color: #e65100; }
+  button { margin-top: 10px; font-size: 13px; padding: 4px 8px; }
+  pre { max-height: 240px; overflow: auto; background: #f3f3f3;
+    font-size: 11px; padding: 8px; display: none; }
+</style>
+</head>
+<body>
+<h1>FIRE シミュレーション</h1>
+<div class="gen">生成: __GENERATED_AT__ / ローカル計算（外部送信なし）</div>
+<div id="headline" class="headline">—</div>
+<div class="wrap">
+  <div class="chartbox">
+    <canvas id="chart" width="900" height="360"></canvas>
+    <div class="legend">
+      <span class="b">■ 期末資産（このまま働き続けた予想）</span>
+      <span class="o">■ FIRE必要資産（働かなくても目標年齢まで持つ最低額）</span>
+      交点＝FIRE可能時期
+    </div>
+    <button id="dbgBtn" type="button">デバッグ表を表示/非表示</button>
+    <pre id="dbg"></pre>
+  </div>
+  <div class="panel">
+    <div class="profiles">
+      表示:
+      <label><input type="radio" name="prof" value="simple"> シンプル</label>
+      <label><input type="radio" name="prof" value="detailed" checked> 詳細</label>
+    </div>
+    <div id="sliders"></div>
+    <button id="resetBtn" type="button">初期値に戻す</button>
+  </div>
+</div>
+
+<script>
+/* ===== シミュレーションエンジン（engine.ts を transpile して埋め込み） ===== */
+__ENGINE_JS__
+/* ===== 入力値・スライダー定義 ===== */
+var BASE_PARAMS = __PARAMS_JSON__;
+var SLIDERS = __SLIDERS_JSON__;
+var PROFILE = "__PROFILE_DEFAULT__";
+
+(function () {
+  var params = Object.assign({}, BASE_PARAMS);
+  var canvas = document.getElementById("chart");
+  var ctx = canvas.getContext("2d");
+
+  function fmt(v, unit) {
+    if (unit === "%") return (v * 100).toFixed(1) + "%";
+    if (unit === "万円") return Math.round(v / 10000).toLocaleString() + "万";
+    if (unit === "歳") return v + "歳";
+    return Math.round(v).toLocaleString() + "円";
+  }
+  function yen(v) {
+    return "¥" + Math.round(v).toLocaleString();
+  }
+
+  function draw(res) {
+    var W = canvas.width, H = canvas.height, padL = 70, padB = 28, padT = 12, padR = 12;
+    ctx.clearRect(0, 0, W, H);
+    var rows = res.monthly;
+    var n = rows.length;
+    if (!n) return;
+    var lo = Infinity, hi = -Infinity;
+    for (var i = 0; i < n; i++) {
+      var e = rows[i].endAssets;
+      if (e < lo) lo = e; if (e > hi) hi = e;
+      var f = rows[i].fireNeed;
+      if (f != null) { if (f < lo) lo = f; if (f > hi) hi = f; }
+    }
+    if (lo === hi) { hi = lo + 1; }
+    function X(i) { return padL + (W - padL - padR) * (i / (n - 1)); }
+    function Y(v) { return padT + (H - padT - padB) * (1 - (v - lo) / (hi - lo)); }
+    // 0 ライン
+    ctx.strokeStyle = "#ddd"; ctx.beginPath();
+    ctx.moveTo(padL, Y(0)); ctx.lineTo(W - padR, Y(0)); ctx.stroke();
+    // 軸ラベル（資産レンジと両端の年）
+    ctx.fillStyle = "#666"; ctx.font = "11px sans-serif";
+    ctx.fillText((hi / 1e8).toFixed(1) + "億", 4, Y(hi) + 4);
+    ctx.fillText((lo / 1e8).toFixed(1) + "億", 4, Y(lo) + 4);
+    ctx.fillText(rows[0].ym, padL, H - 8);
+    ctx.fillText(rows[n - 1].ym, W - padR - 36, H - 8);
+    function line(getter, color) {
+      ctx.strokeStyle = color; ctx.lineWidth = 2; ctx.beginPath();
+      var started = false;
+      for (var i = 0; i < n; i++) {
+        var v = getter(rows[i]);
+        if (v == null) { started = false; continue; }
+        var px = X(i), py = Y(v);
+        if (!started) { ctx.moveTo(px, py); started = true; } else ctx.lineTo(px, py);
+      }
+      ctx.stroke();
+    }
+    line(function (r) { return r.endAssets; }, "#1565c0");
+    line(function (r) { return r.fireNeed; }, "#e65100");
+    // 交点（FIRE可能時期）に縦線
+    if (res.fireDate) {
+      for (var j = 0; j < n; j++) {
+        if (rows[j].ym === res.fireDate) {
+          ctx.strokeStyle = "#2e7d32"; ctx.setLineDash([4, 3]); ctx.beginPath();
+          ctx.moveTo(X(j), padT); ctx.lineTo(X(j), H - padB); ctx.stroke();
+          ctx.setLineDash([]); break;
+        }
+      }
+    }
+  }
+
+  function headline(res) {
+    var el = document.getElementById("headline");
+    if (res.fireDate) {
+      el.className = "headline";
+      el.textContent = "FIRE可能時期: " + res.fireDate +
+        "（本人 " + res.ageAtFire + "歳）　終了年齢資産: " +
+        yen(res.endAssetsAtSimEnd) + "（" + res.verdict + "）";
+    } else {
+      el.className = "headline warn";
+      el.textContent = "現状の設定では目標年齢までに FIRE 必要資産へ到達しません" +
+        (res.depletionMonth ? "（資産枯渇: " + res.depletionMonth + "）" : "") +
+        "　終了年齢資産: " + yen(res.endAssetsAtSimEnd);
+    }
+  }
+
+  function dumpTable(res) {
+    var lines = ["年月\t本人\t期首\t収入\t支出\t収支\t期末\tFIRE必要"];
+    res.monthly.forEach(function (r) {
+      lines.push([r.ym, r.ageSelf, Math.round(r.openAssets), Math.round(r.income),
+        Math.round(r.expense), Math.round(r.net), Math.round(r.endAssets),
+        r.fireNeed == null ? "" : Math.round(r.fireNeed)].join("\t"));
+    });
+    document.getElementById("dbg").textContent = lines.join("\n");
+  }
+
+  function recompute() {
+    var res = simulate(params);
+    draw(res); headline(res); dumpTable(res);
+  }
+
+  function renderSliders() {
+    var box = document.getElementById("sliders");
+    box.innerHTML = "";
+    SLIDERS.filter(function (s) { return s.profiles.indexOf(PROFILE) >= 0; })
+      .forEach(function (s) {
+        var wrap = document.createElement("div"); wrap.className = "sld";
+        var lab = document.createElement("label");
+        var name = document.createElement("span"); name.textContent = s.label;
+        var val = document.createElement("span"); val.className = "val";
+        val.textContent = fmt(params[s.key], s.unit);
+        lab.appendChild(name); lab.appendChild(val);
+        var inp = document.createElement("input");
+        inp.type = "range"; inp.min = s.min; inp.max = s.max;
+        inp.step = s.step; inp.value = params[s.key];
+        inp.addEventListener("input", function () {
+          params[s.key] = parseFloat(inp.value);
+          val.textContent = fmt(params[s.key], s.unit);
+          recompute();
+        });
+        wrap.appendChild(lab); wrap.appendChild(inp); box.appendChild(wrap);
+      });
+  }
+
+  document.querySelectorAll('input[name=prof]').forEach(function (r) {
+    r.addEventListener("change", function () {
+      if (r.checked) { PROFILE = r.value; renderSliders(); }
+    });
+  });
+  document.getElementById("resetBtn").addEventListener("click", function () {
+    params = Object.assign({}, BASE_PARAMS); renderSliders(); recompute();
+  });
+  document.getElementById("dbgBtn").addEventListener("click", function () {
+    var d = document.getElementById("dbg");
+    d.style.display = d.style.display === "block" ? "none" : "block";
+  });
+
+  renderSliders();
+  recompute();
+})();
+</script>
+</body>
+</html>
