@@ -91,7 +91,49 @@ describe("simulate", () => {
     expect(r.verdict).toBe("達成");
   });
 
+  it("自己整合: I列はリタイア前の月も退職後社会保険料を含む（過少評価しない）", () => {
+    // 退職済み前提支出 = 基本20万＋保険5万 = 25万/月、rm=0、t0 から 25 ヶ月分。
+    expect(m[0]?.fireNeed).toBe(6_250_000); // 250,000 × 25
+  });
+
+  it("verdict は fireEndAssets（fireDate に退職した場合）で判定し矛盾しない", () => {
+    // 初月 FIRE→年金0・退職済み支出25万を 25 ヶ月 → 1000万−625万=375万。
+    expect(r.fireEndAssets).toBe(3_750_000);
+    expect(r.fireDate).not.toBeNull();
+    expect(r.verdict).not.toBe("未達"); // fireDate があれば未達にならない
+  });
+
   it("決定的（同入力→同出力）", () => {
     expect(JSON.stringify(simulate(P))).toBe(JSON.stringify(r));
+  });
+});
+
+// 収入ゼロで資産が枯渇するシナリオ。どの月も必要ラインを超えないので
+// sustained 判定で fireDate=null、verdict=未達、fireEndAssets=null。
+const DEPLETE: SimParams = {
+  ...P,
+  currentAssets: 2_000_000,
+  baseLivingMonthly: 300_000,
+  postRetireInsuranceMonthly: 0,
+  selfRetireDate: "2000-01-01", // 過去＝就労収入なし
+  selfMonthlyIncome: 0,
+  selfRetireLump: 0,
+  fireTargetAge: 47,
+  simEndAge: 47,
+};
+
+describe("simulate: 枯渇シナリオ", () => {
+  const r = simulate(DEPLETE);
+
+  it("どの月も必要ライン未満 → FIRE 不可・未達・fireEndAssets なし", () => {
+    expect(r.fireDate).toBeNull();
+    expect(r.ageAtFire).toBeNull();
+    expect(r.fireEndAssets).toBeNull();
+    expect(r.verdict).toBe("未達");
+  });
+
+  it("資産枯渇月を検出（2026/07）し終了年齢資産は負", () => {
+    expect(r.depletionMonth).toBe("2026/07"); // 2,000,000 − 300,000×7 < 0
+    expect(r.endAssetsAtSimEnd).toBe(-1_900_000); // 2,000,000 − 300,000×13
   });
 });

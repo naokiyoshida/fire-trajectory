@@ -243,14 +243,15 @@ var PROFILE = "__PROFILE_DEFAULT__";
   function headline(res) {
     var el = document.getElementById("headline");
     if (res.fireDate) {
-      el.className = res.endAssetsAtSimEnd < 0 ? "headline warn" : "headline";
+      el.className = "headline";
       el.textContent = "FIRE可能時期: " + res.fireDate +
-        "（本人 " + res.ageAtFire + "歳）　終了年齢資産: " +
-        yen(res.endAssetsAtSimEnd) + "（" + res.verdict + "）" +
+        "（本人 " + res.ageAtFire + "歳）　" +
+        "この時期に退職した場合の終了年齢資産: " +
+        yen(res.fireEndAssets) + "（" + res.verdict + "）" +
         (res.endAssetsAtSimEnd < 0
-          ? "　※この時期に退職すれば年金のみで目標年齢まで持つ計算。現行の"
-            + "リタイア予定日まで就労を続ける前提だと終了資産はマイナス。"
-          : "");
+          ? "　※現行プラン（リタイア予定日まで就労）だと終了資産は "
+            + yen(res.endAssetsAtSimEnd) + "。早く（FIRE可能時期に）退職する方が有利。"
+          : "　／現行プラン（就労継続）の終了資産: " + yen(res.endAssetsAtSimEnd));
     } else {
       el.className = "headline warn";
       el.textContent = "現状の設定では目標年齢までに FIRE 必要資産へ到達しません" +

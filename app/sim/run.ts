@@ -28,7 +28,10 @@ export async function runSim(options: RunSimOptions = {}): Promise<number> {
   logger.info(
     result.fireDate
       ? `FIRE可能時期: ${result.fireDate}（本人 ${result.ageAtFire}歳） / ` +
-          `終了年齢資産 ¥${Math.round(result.endAssetsAtSimEnd).toLocaleString()}（${result.verdict}）`
+          `その時退職した場合の終了年齢資産 ¥${Math.round(
+            result.fireEndAssets ?? 0,
+          ).toLocaleString()}（${result.verdict}） / ` +
+          `就労継続だと ¥${Math.round(result.endAssetsAtSimEnd).toLocaleString()}`
       : `現設定では目標年齢までに FIRE 必要資産へ未到達` +
           (result.depletionMonth ? `（資産枯渇 ${result.depletionMonth}）` : ""),
   );
@@ -45,15 +48,16 @@ export async function runSim(options: RunSimOptions = {}): Promise<number> {
       rep.maxNeedDiff,
     ).toLocaleString()}`,
   );
+  // 自己整合モデル（§4.3）採用後、engine はレガシー GAS シミュとは設計上
+  // 意図的に乖離する（engine が唯一の正・GAS シミュは撤去対象）。よって
+  // --check は撤去ゲートではなく**参考情報**。乖離があっても exit 0。
   if (rep.firstDivergence) {
-    logger.error(`パリティ乖離: ${rep.firstDivergence}（許容超）。`);
-    logger.error(
-      "Sheets シミュレーション撤去はまだ不可。engine か設定読込を §4.4 に照合して調整してください。",
+    logger.info(
+      `（参考）レガシー GAS シミュとの差: ${rep.firstDivergence}。` +
+        "自己整合モデル移行による設計どおりの乖離（engine が正）。",
     );
-    return 6;
+  } else {
+    logger.info("（参考）レガシー GAS シミュと一致。");
   }
-  logger.info(
-    "パリティ OK。Sheets シミュレーション撤去のゲートを満たしました（DEPLOY_GUIDE 参照）。",
-  );
   return 0;
 }

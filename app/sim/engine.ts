@@ -9,6 +9,14 @@
  * I列の逆算式は app/gas/formula-builders.ts: fireNeedValue と同一の算術:
  *   I(r) = nextReq/(1+月次実質利回り) − 年金実質(r) + 支出実質(r)
  * 同一性は tests/sim/engine.test.ts が fireNeedValue と数値比較して固定する。
+ *
+ * 【自己整合モデル §4.3】I列は「その月に退職したら」を問う指標なので、
+ * 退職後社会保険料は selfRetireDate ではなく**当月以降ずっと**発生する前提で
+ * 計上する（就労プランの E列＝期末資産トラジェクトリとは別の支出系列）。
+ * FIRE可能時期は「以降ずっと 期末資産≥必要資産 を維持する最初の月」
+ * （初接触ではない）。verdict はその時退職した場合の終了資産で判定し、
+ * FIRE可能時期と矛盾しない。これにより engine はレガシー GAS シミュとは
+ * 設計上意図的に乖離する（engine が唯一の正・GAS シミュは撤去対象）。
  */
 
 export interface SimParams {
@@ -65,14 +73,19 @@ export interface SimMonth {
 
 export interface SimResult {
   monthly: SimMonth[];
-  /** 期末資産が必要ラインを初めて上回る月（"YYYY/MM"）。到達しなければ null */
+  /**
+   * 「以降ずっと 期末資産≥FIRE必要資産 を維持する最初の月」("YYYY/MM")。
+   * この月に退職すれば年金のみで目標年齢まで持つ＝FIRE可能時期。null＝到達せず。
+   */
   fireDate: string | null;
   ageAtFire: number | null;
-  /** 期末資産が初めてマイナスになる月（資産枯渇）。なければ null */
+  /** 就労プラン（リタイア予定日まで就労）で期末資産が初めて負になる月。なければ null */
   depletionMonth: string | null;
-  /** シミュレーション終了年齢時点の予想期末資産 */
+  /** 就労プランでシミュレーション終了年齢時点の予想期末資産（参考・透明性のため保持） */
   endAssetsAtSimEnd: number;
-  /** 終了年齢資産としきい値からの余裕度 */
+  /** fireDate に退職した場合の終了年齢時点資産（年金のみ・一時金は当てにしない）。fireDate なしは null */
+  fireEndAssets: number | null;
+  /** 余裕度。fireDate があれば fireEndAssets で判定し fireDate と矛盾しない */
   verdict: "盤石" | "余裕" | "達成" | "未達";
 }
 
@@ -141,9 +154,11 @@ export function simulate(p: SimParams): SimResult {
   const totalMonths = Math.max(endIdx - startIdx + 1, 1);
 
   const rows: SimMonth[] = [];
-  // 年金実質・支出実質は I列逆算でも使うので別途保持
+  // 年金実質は I列逆算でも使うので別途保持
   const pensionRealArr: number[] = [];
-  const expenseRealArr: number[] = [];
+  // I列用「退職済み前提」の支出（名目／実質）。就労プランの expense とは別系列。
+  const retiredExpenseNomArr: number[] = [];
+  const iColExpenseRealArr: number[] = [];
   const ageSelfArr: number[] = [];
 
   let prevEnd = p.currentAssets;
@@ -199,8 +214,16 @@ export function simulate(p: SimParams): SimResult {
       fireNeed: null,
     });
     pensionRealArr.push(pensionReal);
-    // §4.3: E列は名目固定なので I列内では実質化して計上
-    expenseRealArr.push(expense / deflator);
+    // §4.3 自己整合: I列は「この月に退職した」前提なので退職後社会保険料は
+    // selfRetireDate ではなく当月以降ずっと計上する（ローン/息子支援は各終了日
+    // 依存のまま）。E列は名目固定なので実質化（÷deflator）して保持。
+    const retiredExpense =
+      p.baseLivingMonthly +
+      (idx <= loanEndIdx ? p.loanMonthly : 0) +
+      (idx <= childEndIdx ? p.childSupportMonthly : 0) +
+      p.postRetireInsuranceMonthly;
+    retiredExpenseNomArr.push(retiredExpense);
+    iColExpenseRealArr.push(retiredExpense / deflator);
     ageSelfArr.push(ageSelf);
   }
 
@@ -215,42 +238,75 @@ export function simulate(p: SimParams): SimResult {
       continue;
     }
     const need =
-      nextReq / (1 + rm) - (pensionRealArr[t] ?? 0) + (expenseRealArr[t] ?? 0);
+      nextReq / (1 + rm) -
+      (pensionRealArr[t] ?? 0) +
+      (iColExpenseRealArr[t] ?? 0);
     row.fireNeed = need;
     nextReq = need;
   }
 
   // --- 派生指標 ---
+  // FIRE可能時期 = 「以降ずっと 期末資産≥必要資産 を維持する最初の月」。
+  // 一時的に超えてもその後割り込むなら不可（最後に割り込んだ次の有効月が答え）。
+  let lastFail = -1;
+  let lastNonNull = -1;
+  let depletionMonth: string | null = null;
+  for (let t = 0; t < totalMonths; t++) {
+    const r = rows[t];
+    if (r === undefined) continue;
+    if (depletionMonth === null && r.endAssets < 0) depletionMonth = r.ym;
+    if (r.fireNeed === null) continue;
+    lastNonNull = t;
+    if (r.endAssets < r.fireNeed) lastFail = t;
+  }
   let fireDate: string | null = null;
   let ageAtFire: number | null = null;
-  let depletionMonth: string | null = null;
-  for (const r of rows) {
-    if (
-      fireDate === null &&
-      r.fireNeed !== null &&
-      r.endAssets >= r.fireNeed
-    ) {
+  let fireIdx = -1;
+  if (lastNonNull >= 0 && lastFail < lastNonNull) {
+    for (let t = lastFail + 1; t < totalMonths; t++) {
+      const r = rows[t];
+      if (r === undefined || r.fireNeed === null) continue;
       fireDate = r.ym;
       ageAtFire = r.ageSelf;
-    }
-    if (depletionMonth === null && r.endAssets < 0) {
-      depletionMonth = r.ym;
-    }
-  }
-
-  // 終了年齢時点（本人が simEndAge の最初の月、無ければ最終行）
-  let endAssetsAtSimEnd = rows.length ? (rows[rows.length - 1]?.endAssets ?? 0) : 0;
-  for (const r of rows) {
-    if (r.ageSelf >= p.simEndAge) {
-      endAssetsAtSimEnd = r.endAssets;
+      fireIdx = t;
       break;
     }
   }
+
+  // 終了年齢アンカー（本人が simEndAge に達する最初の月、無ければ最終行）
+  let anchor = totalMonths - 1;
+  for (let t = 0; t < totalMonths; t++) {
+    if ((ageSelfArr[t] ?? -1) >= p.simEndAge) {
+      anchor = t;
+      break;
+    }
+  }
+  // 就労プラン（リタイア予定日まで就労）の終了年齢時点資産（参考・透明性）
+  const endAssetsAtSimEnd = rows[anchor]?.endAssets ?? 0;
+
+  // fireDate に退職した場合の終了年齢資産（年金のみ・退職済み支出・一時金なし）。
+  // verdict をこれで判定することで FIRE可能時期と矛盾しない。
+  let fireEndAssets: number | null = null;
+  if (fireIdx >= 0) {
+    let a = rows[fireIdx]?.openAssets ?? p.currentAssets;
+    for (let t = fireIdx; t <= anchor; t++) {
+      const inc = pensionRealArr[t] ?? 0;
+      const exp = retiredExpenseNomArr[t] ?? 0;
+      a = (a + inc - exp) * (1 + rm);
+    }
+    fireEndAssets = a;
+  }
+
   let verdict: SimResult["verdict"];
-  if (endAssetsAtSimEnd >= p.fireSolidThreshold) verdict = "盤石";
-  else if (endAssetsAtSimEnd >= p.fireComfortThreshold) verdict = "余裕";
-  else if (endAssetsAtSimEnd >= 0) verdict = "達成";
-  else verdict = "未達";
+  if (fireDate === null) {
+    verdict = "未達";
+  } else {
+    const fe = fireEndAssets ?? 0;
+    if (fe >= p.fireSolidThreshold) verdict = "盤石";
+    else if (fe >= p.fireComfortThreshold) verdict = "余裕";
+    else if (fe >= 0) verdict = "達成";
+    else verdict = "未達";
+  }
 
   return {
     monthly: rows,
@@ -258,6 +314,7 @@ export function simulate(p: SimParams): SimResult {
     ageAtFire,
     depletionMonth,
     endAssetsAtSimEnd,
+    fireEndAssets,
     verdict,
   };
 }
