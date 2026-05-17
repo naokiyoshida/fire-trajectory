@@ -1,22 +1,18 @@
 /**
- * `npm run sim` / `npm run sim -- --check` のオーケストレーション。
+ * `npm run sim` のオーケストレーション。
  * 設定シートを読み取り専用で取得 → engine 実行 → dist/fire.html 生成。
- * --check 時は現行シミュレーションシートとパリティ比較し exit code を返す。
+ *
+ * シミュレーション計算の唯一の正は engine.ts。Sheets 側のシミュレーション
+ * 機能（setupSimulation / FIRE射程 / パリティ比較）は撤去済み（§4.5）。
  */
 import { loadConfig, requireSheetsConfig } from "../core/config.js";
 import { logger } from "../core/logger.js";
 import { createSheetsClient } from "../core/sheets-client.js";
 import { simulate } from "./engine.js";
 import { loadSimParams } from "./load-inputs.js";
-import { compareToSheet, fetchSheetSimRows } from "./parity.js";
 import { renderHtml } from "./render-html.js";
 
-export interface RunSimOptions {
-  check?: boolean;
-}
-
-/** 戻り値は CLI 終了コード（0=正常、6=パリティ乖離）。 */
-export async function runSim(options: RunSimOptions = {}): Promise<number> {
+export async function runSim(): Promise<void> {
   const cfg = requireSheetsConfig(loadConfig());
   const client = await createSheetsClient(cfg.sheetId, cfg.serviceAccountJson);
 
@@ -36,28 +32,4 @@ export async function runSim(options: RunSimOptions = {}): Promise<number> {
           (result.depletionMonth ? `（資産枯渇 ${result.depletionMonth}）` : ""),
   );
   logger.info(`ブラウザで開く: file://${out.replace(/\\/g, "/")}`);
-
-  if (!options.check) return 0;
-
-  const sheetRows = await fetchSheetSimRows(client);
-  const rep = compareToSheet(result.monthly, sheetRows);
-  logger.info(
-    `パリティ: ${rep.comparedCount} ヶ月比較 / 期末資産 最大差 ¥${Math.round(
-      rep.maxEndDiff,
-    ).toLocaleString()} / FIRE必要資産 最大差 ¥${Math.round(
-      rep.maxNeedDiff,
-    ).toLocaleString()}`,
-  );
-  // 自己整合モデル（§4.3）採用後、engine はレガシー GAS シミュとは設計上
-  // 意図的に乖離する（engine が唯一の正・GAS シミュは撤去対象）。よって
-  // --check は撤去ゲートではなく**参考情報**。乖離があっても exit 0。
-  if (rep.firstDivergence) {
-    logger.info(
-      `（参考）レガシー GAS シミュとの差: ${rep.firstDivergence}。` +
-        "自己整合モデル移行による設計どおりの乖離（engine が正）。",
-    );
-  } else {
-    logger.info("（参考）レガシー GAS シミュと一致。");
-  }
-  return 0;
 }

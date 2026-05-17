@@ -2,8 +2,8 @@
  * fire-trajectory: GAS スクリプト
  *
  * 役割:
- *   - 「設定」「シミュレーション」「月次収支」「カテゴリ別支出」
- *     「純資産推移」「資産配分」「FIRE射程」シートの自動構築
+ *   - 「設定」「月次収支」「カテゴリ別支出」「純資産推移」「資産配分」
+ *     シートの自動構築
  *   - スプレッドシートを開いた時のカスタムメニュー
  *
  * シート名（すべて日本語に統一）:
@@ -11,8 +11,7 @@
  *   - 資産推移       (Node 側で書き込み)
  *   - 手動入力資産   (ユーザー入力)
  *   - 設定           (このスクリプトで構築・ユーザー編集)
- *   - シミュレーション (このスクリプトで構築)
- *   - 月次収支 / カテゴリ別支出 / 純資産推移 / 資産配分 / FIRE射程 (このスクリプトで構築)
+ *   - 月次収支 / カテゴリ別支出 / 純資産推移 / 資産配分 (このスクリプトで構築)
  *
  * 廃止された役割（Node.js + Playwright 側に移行）:
  *   - マネフォME からのデータ受信 (doPost / sync_data 系) は削除済み
@@ -25,12 +24,10 @@ const SHEET = {
   ASSETS: '資産推移',
   MANUAL_ASSETS: '手動入力資産',
   DASHBOARD: '設定',
-  SIMULATION: 'シミュレーション',
   REPORT_CASHFLOW: '月次収支',
   REPORT_SPENDING: 'カテゴリ別支出',
   REPORT_NETWORTH: '純資産推移',
-  REPORT_ALLOCATION: '資産配分',
-  REPORT_FIRE: 'FIRE射程'
+  REPORT_ALLOCATION: '資産配分'
 };
 
 // 数式内でシート名を 'シート名' 形式に引用するヘルパー
@@ -52,7 +49,7 @@ function dashLookup_(dashRef, key) {
 function onOpen() {
   const ui = SpreadsheetApp.getUi();
   ui.createMenu('Fire Trajectory')
-    .addItem('シミュレーションの再構築', 'setupSimulation')
+    .addItem('設定シートの再構築', 'setupSettings')
     .addItem('レポートの再構築', 'setupReports')
     .addItem('表示形式の適用', 'applyFormatting')
     .addSeparator()
@@ -116,12 +113,12 @@ function getCurrentValue_(items, existingValues, key) {
 }
 
 /**
- * シミュレーション環境のセットアップ。
- * 1. 「設定」シートの作成・初期値入力（既存値は保持）
- * 2. 「シミュレーション」シートの作成・数式モデル構築
+ * 「設定」シート（入力ストア）の作成・初期値入力（既存値は保持）。
+ * シミュレーション計算は Node 側 engine.ts（唯一の正）が担うため、
+ * ここでは設定シートの構築のみを行う。
  */
-function setupSimulation() {
-  console.log("【開始】setupSimulation");
+function setupSettings() {
+  console.log("【開始】setupSettings");
   const ss = SpreadsheetApp.getActiveSpreadsheet();
   const Q = quoteSheetName_;
 
@@ -331,166 +328,6 @@ function setupSimulation() {
     }
   });
 
-  // --- 2. 「シミュレーション」シート ---
-  let simSheet = ss.getSheetByName(SHEET.SIMULATION);
-  if (!simSheet) {
-    simSheet = ss.insertSheet(SHEET.SIMULATION);
-  }
-  simSheet.clear();
-
-  const simHeaders = ['年月', '本人年齢', '期首資産', '収入', '支出', '収支', '実質利回り(月)', '期末資産', 'FIRE必要資産(目標年齢まで)'];
-  simSheet.getRange(1, 1, 1, simHeaders.length).setValues([simHeaders]).setBackground('#f3f3f3').setFontWeight('bold');
-
-  const startDate = new Date();
-  startDate.setDate(1);
-
-  const userBdayVal = getCurrentValue_(settingItems, existingValues, '本人誕生日');
-  let userBdayDate = new Date(userBdayVal);
-  if (isNaN(userBdayDate.getTime())) {
-    userBdayDate = new Date('1977/03/09');
-  }
-
-  let simEndAge = parseInt(String(getCurrentValue_(settingItems, existingValues, 'シミュレーション終了年齢')), 10);
-  if (!Number.isFinite(simEndAge) || simEndAge <= 0 || simEndAge > 200) simEndAge = 100;
-
-  // FIRE必要資産ライン（I列）は末尾の「目標年齢の月」から逆算する。
-  // そのアンカー行が必ず存在するよう、行数は シミュレーション終了年齢 と
-  // FIRE必要資産_目標年齢 の大きい方まで生成する。
-  let fireTargetAge = parseInt(String(getCurrentValue_(settingItems, existingValues, 'FIRE必要資産_目標年齢')), 10);
-  if (!Number.isFinite(fireTargetAge) || fireTargetAge <= 0 || fireTargetAge > 200) fireTargetAge = 100;
-  const effEndAge = Math.max(simEndAge, fireTargetAge);
-
-  const endYear = userBdayDate.getFullYear() + effEndAge;
-  const endMonth = userBdayDate.getMonth();
-
-  let initialRows = (endYear - startDate.getFullYear()) * 12 + (endMonth - startDate.getMonth()) + 1;
-  if (isNaN(initialRows) || initialRows < 12) initialRows = 12;
-
-  const rows = [];
-
-  // 数式は「設定」シートの項目を行番号ではなく "項目名で MATCH" 参照する（dashLookup_）。
-  // これにより設定シートの並び替え・セクション見出し挿入をしても数式が壊れない。
-  const dashRef = Q(SHEET.DASHBOARD);
-  const L = function (key) { return dashLookup_(dashRef, key); };
-  const D = {
-    UserBday:              L('本人誕生日'),
-    SpouseBday:            L('配偶者誕生日'),
-    CurrentAsset:          L('現在の資産'),
-    RetireDate:            L('リタイア予定日'),
-    GtSpouseRetire:        L('配偶者退職予定日'),
-    GtLoanDate:            L('ローン完済予定日'),
-    GtSonDate:             L('息子支援終了日'),
-    BasicExpense:          L('基本生活費_月額'),
-    LoanAmount:            L('ローン月額'),
-    SonAmount:             L('息子支援月額'),
-    PostRetireInsurance:   L('退職後社会保険料_月額'),
-    UserMonthlyHH:         L('本人月収_家計入金'),
-    UserBonusHH:           L('本人ボーナス_年額_家計入金'),
-    SpouseMonthlyHH:       L('配偶者月収_家計入金'),
-    SpouseBonusHH:         L('配偶者ボーナス_年額_家計入金'),
-    UserRetireLump:        L('本人退職時一時金'),
-    SpouseRetireLump:      L('配偶者退職時一時金'),
-    UserPension:           L('本人年金_年額'),
-    SpousePension:         L('配偶者年金_年額'),
-    UserPensionStartAge:   L('本人年金開始年齢'),
-    SpousePensionStartAge: L('配偶者年金開始年齢'),
-    NominalYield:          L('運用利回り_名目'),
-    Inflation:             L('インフレ率'),
-    FireSafeThreshold:     L('FIRE射程_盤石閾値'),
-    FireComfortThreshold:  L('FIRE射程_余裕閾値'),
-    FireTargetAge:         L('FIRE必要資産_目標年齢'),
-    FireTargetResidual:    L('FIRE必要資産_目標残額'),
-    SimEndAge:             L('シミュレーション終了年齢')
-  };
-
-  for (let i = 0; i < initialRows; i++) {
-    const targetDate = new Date(startDate.getFullYear(), startDate.getMonth() + i, 1);
-    const rowIdx = i + 2;
-
-    const aColVal = `=DATE(${targetDate.getFullYear()}, ${targetDate.getMonth() + 1}, 1)`;
-    const dateRef = `$A${rowIdx}`;
-
-    const ageFormula = `=DATEDIF(${D.UserBday}, ${dateRef}, "Y")`;
-
-    const openingBalance = (i === 0) ? `=${D.CurrentAsset}` : `=H${rowIdx - 1}`;
-
-    // 月次収入は「月収_家計入金 + ボーナス_家計入金_年額/12」で平準化
-    const incUser = `IF(${dateRef} <= ${D.RetireDate}, ${D.UserMonthlyHH} + ${D.UserBonusHH}/12, 0)`;
-    const incSpouse = `IF(${dateRef} <= ${D.GtSpouseRetire}, ${D.SpouseMonthlyHH} + ${D.SpouseBonusHH}/12, 0)`;
-    // 実質割戻し係数: 本シミュレーションは「今日の円（実質）」で計算する。
-    // 年金・退職一時金は ねんきん定期便等の「将来名目額」で入力されるため、
-    // 開始月までの経過年数ぶんインフレで割り戻して実質化する。
-    // （給与・基本生活費はインフレ連動＝実質ほぼ一定と仮定し割戻さない）
-    const realDeflator = `(1+${D.Inflation})^(${i}/12)`;
-    // 年金は本人・配偶者で開始年齢を独立に設定可能（繰上/繰下に対応）
-    const startUserPen = `EDATE(${D.UserBday}, 12*${D.UserPensionStartAge})`;
-    const startSpousePen = `EDATE(${D.SpouseBday}, 12*${D.SpousePensionStartAge})`;
-    const incUserPen = `IF(${dateRef} >= ${startUserPen}, (${D.UserPension}/12)/${realDeflator}, 0)`;
-    const incSpousePen = `IF(${dateRef} >= ${startSpousePen}, (${D.SpousePension}/12)/${realDeflator}, 0)`;
-    // 退職一時金: 本人はリタイア予定月、配偶者は配偶者退職予定月にそれぞれ加算（実質割戻し済み）
-    const incUserLump = `IF(TEXT(${dateRef},"yyyyMM")=TEXT(${D.RetireDate},"yyyyMM"), ${D.UserRetireLump}/${realDeflator}, 0)`;
-    const incSpouseLump = `IF(TEXT(${dateRef},"yyyyMM")=TEXT(${D.GtSpouseRetire},"yyyyMM"), ${D.SpouseRetireLump}/${realDeflator}, 0)`;
-
-    const income = `=${incUser} + ${incSpouse} + ${incUserPen} + ${incSpousePen} + ${incUserLump} + ${incSpouseLump}`;
-
-    const expBasic = `${D.BasicExpense}`;
-    const expLoan = `IF(${dateRef} <= ${D.GtLoanDate}, ${D.LoanAmount}, 0)`;
-    const expSon = `IF(${dateRef} <= ${D.GtSonDate}, ${D.SonAmount}, 0)`;
-    // リタイア予定日以降は就労時の社会保険控除が消えるため、国保・介護保険料を加算。
-    const expInsurance = `IF(${dateRef} >= ${D.RetireDate}, ${D.PostRetireInsurance}, 0)`;
-
-    const expense = `=${expBasic} + ${expLoan} + ${expSon} + ${expInsurance}`;
-
-    const monthlyRealYield = `=((1+${D.NominalYield})/(1+${D.Inflation}))^(1/12) - 1`;
-
-    // FIRE必要資産ライン（I列）:
-    //   「この月で就労収入が途絶えても、年金だけで FIRE必要資産_目標年齢 まで
-    //    資産が尽きない最低期首資産」を末尾から逆算する。
-    //   退職一時金は『働き続けないと得られない』ため当てにしない（年金のみ算入）。
-    //   逆算: I(r) = I(r+1)/(1+実質利回り) - 年金(r) + 支出(r)
-    //         末尾（目標年齢の最終月）の次は I の代わりに 目標残額 を使う。
-    //   予想資産(H) がこの線(I) を上回った最初の月 = FIRE 可能時期。
-    const niFire = `(${incUserPen} + ${incSpousePen})`;
-    // 最終行は下の行を参照しない（行トリム後は枠外参照になり #REF! になるため）。
-    // 最終行は effEndAge（>= 目標年齢）なので、目標年齢ならここが終端、超過なら IF で "" になる。
-    const isLastRow = (i === initialRows - 1);
-    const nextReq = isLastRow
-      ? `${D.FireTargetResidual}`
-      : `IF(OR(NOT(ISNUMBER(B${rowIdx + 1})), B${rowIdx + 1} > ${D.FireTargetAge}), ${D.FireTargetResidual}, I${rowIdx + 1})`;
-    // 支出 E列は名目固定なので、実質モデルに合わせ realDeflator で割り戻して計上
-    // （年金 niFire は実質割戻し済み。実質−実質で単位を揃える）。
-    const fireNeed = `=IF(B${rowIdx} > ${D.FireTargetAge}, "", (${nextReq})/(1+G${rowIdx}) - ${niFire} + (E${rowIdx}/${realDeflator}))`;
-
-    rows.push([
-      aColVal,
-      ageFormula,
-      openingBalance,
-      income,
-      expense,
-      `=D${rowIdx}-E${rowIdx}`,
-      monthlyRealYield,
-      `=(C${rowIdx}+F${rowIdx})*(1+G${rowIdx})`,
-      fireNeed
-    ]);
-  }
-
-  simSheet.getRange(2, 1, rows.length, simHeaders.length).setValues(rows);
-  simSheet.getRange(2, 1, rows.length, 1).setNumberFormat("yyyy/MM");
-
-  const maxRows = simSheet.getMaxRows();
-  const requiredRows = rows.length + 1;
-  if (maxRows > requiredRows) {
-    simSheet.deleteRows(requiredRows + 1, maxRows - requiredRows);
-  } else if (maxRows < requiredRows) {
-    simSheet.insertRowsAfter(maxRows, requiredRows - maxRows);
-  }
-
-  try {
-    createTrajectoryChart(simSheet, userBdayDate);
-  } catch (e) {
-    console.warn("createTrajectoryChart failed (continuing without chart): " + e);
-  }
-
   // 表示形式を再適用（再構築で消えた可能性があるため）
   try {
     applyFormatting();
@@ -498,70 +335,12 @@ function setupSimulation() {
     console.warn("applyFormatting failed (continuing): " + e);
   }
 
-  console.log("【完了】setupSimulation");
-}
-
-function createTrajectoryChart(sheet, userBday) {
-  const lastRow = sheet.getLastRow();
-  if (lastRow < 2) return;
-
-  const existingCharts = sheet.getCharts();
-  for (const c of existingCharts) {
-    sheet.removeChart(c);
-  }
-
-  // x軸: 5歳刻みで「2027年 (50歳)」のようなカスタム目盛りを生成する。
-  // 妻と本人は学年が同じなので本人年齢を併記対象とする（妻はほぼ同年）。
-  let hAxisOption = { title: '年月' };
-  try {
-    if (userBday && !isNaN(userBday.getTime())) {
-      const firstDate = sheet.getRange(2, 1).getValue();
-      const lastDate = sheet.getRange(lastRow, 1).getValue();
-      if (firstDate instanceof Date && lastDate instanceof Date) {
-        const interval = 5;
-        const firstAge = firstDate.getFullYear() - userBday.getFullYear();
-        const lastAge = lastDate.getFullYear() - userBday.getFullYear() + 1;
-        const startAge = Math.ceil(firstAge / interval) * interval;
-        const ticks = [];
-        for (let age = startAge; age <= lastAge; age += interval) {
-          const tickDate = new Date(
-            userBday.getFullYear() + age,
-            userBday.getMonth(),
-            userBday.getDate()
-          );
-          if (tickDate < firstDate || tickDate > lastDate) continue;
-          ticks.push({ v: tickDate, f: tickDate.getFullYear() + '年 (' + age + '歳)' });
-        }
-        if (ticks.length > 0) {
-          hAxisOption = { title: '年 / 本人年齢', ticks: ticks };
-        }
-      }
-    }
-  } catch (e) {
-    console.warn('Custom hAxis ticks failed, falling back: ' + e);
-  }
-
-  // 期末資産(H)と FIRE必要資産(I) の2本を折れ線で重ね、交点＝FIRE可能時期を読み取れるようにする
-  const chart = sheet.newChart()
-    .setChartType(Charts.ChartType.LINE)
-    .addRange(sheet.getRange(1, 1, lastRow, 1))   // x: 年月
-    .addRange(sheet.getRange(1, 8, lastRow, 1))   // 系列1: 期末資産（予想）
-    .addRange(sheet.getRange(1, 9, lastRow, 1))   // 系列2: FIRE必要資産（目標年齢まで枯渇しない最低ライン）
-    .setPosition(2, 11, 0, 0)
-    .setOption('title', '資産推移と FIRE必要ライン（予想資産が必要ラインを上回った時がFIRE可能）')
-    .setOption('hAxis', hAxisOption)
-    .setOption('vAxis', { title: '資産額 (円)' })
-    .setOption('legend', { position: 'bottom' })
-    .setOption('width', 960)
-    .setOption('height', 520)
-    .build();
-
-  sheet.insertChart(chart);
+  console.log("【完了】setupSettings");
 }
 
 /**
- * 集計シート（月次収支・カテゴリ別支出・純資産推移・資産配分・FIRE射程）を構築する。
- * 取引履歴 / 資産推移 / シミュレーション を参照する数式ベースの集計シート。
+ * 集計シート（月次収支・カテゴリ別支出・純資産推移・資産配分）を構築する。
+ * 取引履歴 / 資産推移 を参照する数式ベースの集計シート。
  */
 function setupReports() {
   console.log("【開始】setupReports");
@@ -571,7 +350,6 @@ function setupReports() {
   setupReportSpending_(ss);
   setupReportNetWorth_(ss);
   setupReportAllocation_(ss);
-  setupReportFireReadiness_(ss);
 
   try {
     applyFormatting();
@@ -729,122 +507,11 @@ function setupReportAllocation_(ss) {
   sheet.setColumnWidth(2, 150);
 }
 
-function setupReportFireReadiness_(ss) {
-  const Q = quoteSheetName_;
-  let sheet = ss.getSheetByName(SHEET.REPORT_FIRE);
-  if (!sheet) sheet = ss.insertSheet(SHEET.REPORT_FIRE);
-  sheet.clear();
-
-  sheet.getRange('A1').setValue(SHEET.REPORT_FIRE + ': FIRE射程').setFontWeight('bold');
-  sheet.getRange('A2').setValue('「' + SHEET.SIMULATION + '」と「' + SHEET.ASSETS + '」の最新値から主要指標を算出');
-
-  sheet.getRange('A4:B4').setValues([['項目', '値']]).setFontWeight('bold').setBackground('#e6f7ff');
-
-  const assetsRef = Q(SHEET.ASSETS);
-  const simRef = Q(SHEET.SIMULATION);
-  const dashRef = Q(SHEET.DASHBOARD);
-  const simNoData = '"「' + SHEET.SIMULATION + '」データなし"';
-
-  // 各しきい値・年齢を「設定」シートから "項目名で MATCH" 参照（dashLookup_、行番号非依存）
-  const refSimEndAge            = dashLookup_(dashRef, 'シミュレーション終了年齢');
-  const refUserPensionStartAge  = dashLookup_(dashRef, '本人年金開始年齢');
-  const refFireSafe             = dashLookup_(dashRef, 'FIRE射程_盤石閾値');
-  const refFireComfort          = dashLookup_(dashRef, 'FIRE射程_余裕閾値');
-
-  // スナップショット日 (資産推移 最新)
-  sheet.getRange('A5').setValue('スナップショット日');
-  sheet.getRange('B5').setFormula(
-    '=IFERROR(IF(COUNTA(' + assetsRef + '!A:A)>1, INDEX(' + assetsRef + '!A:A, COUNTA(' + assetsRef + '!A:A)), ""), "")'
-  );
-
-  // 現在純資産
-  sheet.getRange('A6').setValue('現在純資産（' + SHEET.DASHBOARD + ': 現在の資産）');
-  sheet.getRange('B6').setFormula('=' + dashLookup_(dashRef, '現在の資産'));
-
-  // シミュレーション 最終行（設定の「シミュレーション終了年齢」時点）の期末資産
-  sheet.getRange('A7').setFormula('=' + refSimEndAge + '&"歳時点予想資産"');
-  sheet.getRange('B7').setFormula(
-    '=IFERROR(INDEX(' + simRef + '!H:H, COUNTA(' + simRef + '!A:A)), ' + simNoData + ')'
-  );
-
-  // 本人年金開始年齢時点（Simulation の B 列 = 本人年齢で MATCH）の期末資産
-  sheet.getRange('A8').setFormula('="本人 "&' + refUserPensionStartAge + '&"歳時点予想資産"');
-  sheet.getRange('B8').setFormula(
-    '=IFERROR(INDEX(' + simRef + '!H:H, MATCH(' + refUserPensionStartAge + ', ' + simRef + '!B:B, 0)), ' + simNoData + ')'
-  );
-
-  // 資産が0以下になる最初の月（資産枯渇月）
-  sheet.getRange('A9').setValue('資産枯渇月（あれば）');
-  sheet.getRange('B9').setFormula(
-    '=IFERROR(TEXT(INDEX(' + simRef + '!A:A, MATCH(TRUE, ARRAYFORMULA(' + simRef + '!H2:H<=0), 0)+1), "yyyy/MM"), "枯渇しません")'
-  );
-
-  // 余裕度フラグ：シミュレーション終了年時点の資産が
-  //  > FIRE射程_盤石閾値    → 盤石(◎◎◎)
-  //  > FIRE射程_余裕閾値    → 余裕(◎)
-  //  > 0                    → ギリギリ(△)
-  //  <= 0                   → 枯渇(✕)
-  sheet.getRange('A10').setValue('余裕度判定');
-  sheet.getRange('B10').setFormula(
-    '=IFERROR(IF(B7>' + refFireSafe + ', "◎◎◎ 盤石",' +
-    ' IF(B7>' + refFireComfort + ', "◎ 余裕",' +
-    ' IF(B7>0, "△ ギリギリ", "✕ 枯渇"))), ' + simNoData + ')'
-  );
-
-  // FIRE可能時期: 予想資産(H) が FIRE必要資産ライン(I) を初めて上回る月。
-  // I が数値の行のみ比較（目標年齢超の "" 行を除外）。到達済みなら最初の月＝今。
-  const refFireTargetAge = dashLookup_(dashRef, 'FIRE必要資産_目標年齢');
-  const fireMatch =
-    'MATCH(TRUE, ARRAYFORMULA(IF(ISNUMBER(' + simRef + '!I2:I), ' +
-    simRef + '!H2:H >= ' + simRef + '!I2:I, FALSE)), 0)';
-
-  sheet.getRange('A11').setFormula('="FIRE可能時期（"&' + refFireTargetAge + '&"歳まで枯渇しない前提）"');
-  sheet.getRange('B11').setFormula(
-    '=IFERROR(TEXT(INDEX(' + simRef + '!A:A, ' + fireMatch + '+1), "yyyy/MM"), "期間内に到達せず")'
-  );
-
-  sheet.getRange('A12').setValue('FIRE可能時の本人年齢');
-  sheet.getRange('B12').setFormula(
-    '=IFERROR(INDEX(' + simRef + '!B:B, ' + fireMatch + '+1), ' + simNoData + ')'
-  );
-
-  // --- 逆算アクション指標（「何をどれだけ変えれば早まるか」を数値化）---
-
-  // 現在の月次収支（実質, 収入−支出。プラス＝毎月この額を貯蓄に回せている）
-  sheet.getRange('A13').setValue('現在の月次収支（実質, 収入−支出）');
-  sheet.getRange('B13').setFormula(
-    '=IFERROR(INDEX(' + simRef + '!F:F, 2), ' + simNoData + ')'
-  );
-
-  // FIRE可能までの目安年数（今＝0年。到達しなければメッセージ）
-  sheet.getRange('A14').setValue('FIRE可能までの目安年数');
-  sheet.getRange('B14').setFormula(
-    '=IFERROR((' + fireMatch + '-1)/12, "期間内に到達せず")'
-  );
-
-  // FIRE を約1年前倒しするのに必要な「追加の月次貯蓄」目安（概算）。
-  // 1年手前の月における不足額 = FIRE必要資産(I) − 予想資産(H) を、
-  // 今からその月までの月数で割った近似。MAX(0,…) で負を丸める。
-  sheet.getRange('A15').setValue('1年前倒しに必要な月次追加貯蓄（概算）');
-  sheet.getRange('B15').setFormula(
-    '=IFERROR(IF((' + fireMatch + ')<=13, "既に約1年以内（前倒し不要）",' +
-    ' MAX(0, (INDEX(' + simRef + '!I2:I, (' + fireMatch + ')-12)' +
-    ' - INDEX(' + simRef + '!H2:H, (' + fireMatch + ')-12)) / ((' + fireMatch + ')-13))),' +
-    ' "期間内に到達せず")'
-  );
-
-  sheet.getRange('A16').setValue('※ 上記は概算。利回り/インフレ/生活費を変えた精密比較は設定値を変えて再構築');
-  sheet.getRange('A16').setFontStyle('italic');
-
-  sheet.setColumnWidth(1, 300);
-  sheet.setColumnWidth(2, 200);
-}
-
 /**
  * 全シートに表示形式（数値フォーマット・色分け）を適用する。
  * 各シートが存在すれば適用、無ければスキップ。
  * メニュー「表示形式の適用」から手動で実行できるほか、
- * setupSimulation / setupReports の末尾でも自動的に呼ばれる。
+ * setupSettings / setupReports の末尾でも自動的に呼ばれる。
  */
 function applyFormatting() {
   console.log("【開始】applyFormatting");
@@ -854,7 +521,6 @@ function applyFormatting() {
   applyFormattingManualAssets_(ss);
   applyFormattingTransactions_(ss);
   applyFormattingAssets_(ss);
-  applyFormattingSimulation_(ss);
   applyFormattingReports_(ss);
 
   console.log("【完了】applyFormatting");
@@ -869,7 +535,7 @@ function applyFormattingDashboard_(ss) {
   // ヘッダー（1行目）。2行目は凡例（A:D 結合済み）なので触らない。
   sheet.getRange('A1:D1').setBackground(COLOR_HEADER).setFontWeight('bold');
 
-  // 3行目以降を走査。B も D も空の行はセクション見出し（setupSimulation で着色済み）
+  // 3行目以降を走査。B も D も空の行はセクション見出し（setupSettings で着色済み）
   // なのでスキップ。項目行のみ B を編集可否で色分け、D を灰＋斜体にする。
   for (let r = 3; r <= lastRow; r++) {
     const bCell = sheet.getRange(r, 2);
@@ -979,33 +645,6 @@ function applyFormattingAssets_(ss) {
   for (let c = 2; c <= 15; c++) sheet.setColumnWidth(c, 130);
 }
 
-function applyFormattingSimulation_(ss) {
-  const sheet = ss.getSheetByName(SHEET.SIMULATION);
-  if (!sheet) return;
-
-  sheet.getRange('A1:I1').setBackground(COLOR_DEFAULT).setFontWeight('bold');
-
-  const lastRow = sheet.getLastRow();
-  if (lastRow >= 2) {
-    const dataRows = lastRow - 1;
-    // A 年月
-    sheet.getRange(2, 1, dataRows, 1).setNumberFormat(FMT_YM);
-    // B 本人年齢
-    sheet.getRange(2, 2, dataRows, 1).setNumberFormat(FMT_INT);
-    // C/D/E/F 円
-    sheet.getRange(2, 3, dataRows, 4).setNumberFormat(FMT_YEN);
-    // H 期末資産 / I FIRE必要資産 円
-    sheet.getRange(2, 8, dataRows, 2).setNumberFormat(FMT_YEN);
-    // G 月次実質利回り
-    sheet.getRange(2, 7, dataRows, 1).setNumberFormat('0.000%');
-  }
-
-  sheet.setColumnWidth(1, 90);
-  sheet.setColumnWidth(2, 90);
-  for (let c = 3; c <= 8; c++) sheet.setColumnWidth(c, 130);
-  sheet.setColumnWidth(9, 180);
-}
-
 function applyFormattingReports_(ss) {
   // 月次収支：A,D,G が 年月文字列、B,E,H が ¥
   const cf = ss.getSheetByName(SHEET.REPORT_CASHFLOW);
@@ -1046,16 +685,5 @@ function applyFormattingReports_(ss) {
     if (last >= 5) {
       al.getRange(5, 2, last - 4, 1).setNumberFormat(FMT_YEN);
     }
-  }
-
-  // FIRE射程：B5 日付、B6/B7/B8 円、B12 年齢、B13/B15 円、B14 年数
-  const fr = ss.getSheetByName(SHEET.REPORT_FIRE);
-  if (fr) {
-    fr.getRange('B5').setNumberFormat(FMT_DATE);
-    fr.getRange('B6:B8').setNumberFormat(FMT_YEN);
-    fr.getRange('B12').setNumberFormat(FMT_INT);
-    fr.getRange('B13').setNumberFormat(FMT_YEN);
-    fr.getRange('B14').setNumberFormat('0.0"年"');
-    fr.getRange('B15').setNumberFormat(FMT_YEN);
   }
 }

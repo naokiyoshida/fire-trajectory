@@ -113,39 +113,13 @@ describe("formula-builders (canonical spec)", () => {
   });
 });
 
-// 契約テスト: .gs 側の生成テンプレが本モジュールの正準仕様と一致しているか。
-// どちらか片方だけ変更すると失敗し、サイレントなドリフトを防ぐ。
+// 契約テスト: .gs 側に残る共通ヘルパ／移行ロジックが本モジュールの正準
+// 仕様と一致しているか（シミュレーション数式は engine.ts が唯一の正へ移行
+// したため契約対象外。GAS シミュは撤去済み §4.5）。
 describe("gas_receiver_service.gs ↔ formula-builders contract", () => {
   it("dashLookup_ template matches dashLookup()", () => {
     expect(GAS_SRC).toContain(
       "return 'INDEX(' + dashRef + '!$B:$B, MATCH(\"' + key + '\", ' + dashRef + '!$A:$A, 0))';",
-    );
-  });
-
-  it("realDeflator template present", () => {
-    expect(GAS_SRC).toContain(
-      "const realDeflator = `(1+${D.Inflation})^(${i}/12)`;",
-    );
-  });
-
-  it("pension income is real-deflated (nominal→real bug fix stays)", () => {
-    expect(GAS_SRC).toContain(
-      "const incUserPen = `IF(${dateRef} >= ${startUserPen}, (${D.UserPension}/12)/${realDeflator}, 0)`;",
-    );
-    expect(GAS_SRC).toContain(
-      "const incSpousePen = `IF(${dateRef} >= ${startSpousePen}, (${D.SpousePension}/12)/${realDeflator}, 0)`;",
-    );
-  });
-
-  it("retirement lump is real-deflated", () => {
-    expect(GAS_SRC).toContain(
-      'const incUserLump = `IF(TEXT(${dateRef},"yyyyMM")=TEXT(${D.RetireDate},"yyyyMM"), ${D.UserRetireLump}/${realDeflator}, 0)`;',
-    );
-  });
-
-  it("fireNeed cell template matches fireNeedFormula() with real-deflated expense", () => {
-    expect(GAS_SRC).toContain(
-      'const fireNeed = `=IF(B${rowIdx} > ${D.FireTargetAge}, "", (${nextReq})/(1+G${rowIdx}) - ${niFire} + (E${rowIdx}/${realDeflator}))`;',
     );
   });
 

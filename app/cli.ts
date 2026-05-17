@@ -125,10 +125,8 @@ async function main(): Promise<void> {
       break;
     }
     case "sim": {
-      const check = process.argv.includes("--check");
       const { runSim } = await import("./sim/run.js");
-      const code = await runSim({ check });
-      process.exit(code);
+      await runSim();
       break;
     }
     case "snapshot-assets": {
