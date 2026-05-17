@@ -62,7 +62,7 @@ Node が `Google Sheets API` で書き込み。
 
 | 列 | 名称 | 型 | 説明 |
 |---|---|---|---|
-| A | ID | string (SHA256) | 重複排除用ハッシュ。`SHA256(date-content-amount-source#occurrence)`。**category は意図的に除外**（マネフォME はカテゴリを後から編集でき、含めると編集のたび別 ID 化して二重追記されるため）。自然キー `date-content-amount-source` が衝突する取引には出現順 occurrence(0,1,2…) を付与し、同日・同額・同口座・同内容の別取引（例: 同日に ¥10,000 ATM 出金を2回）も別 ID として保持する。occurrence は「スクレイプ時の MF 返却順／移行時のシート追記順」から決定的に同値が得られるため二重追記も防ぐ。旧式からの移行は `npm run remap-ids`（DEPLOY_GUIDE §8.6）。**残余エッジ**: MF が同一自然キー取引の相対並び順を run 間で入れ替えた場合のみ、当該取引が一度だけ再追記され得る（無言の取りこぼしより検知容易） |
+| A | ID | string (SHA256) | 重複排除用ハッシュ。`SHA256(date-content-amount-source#occurrence)`。**category は意図的に除外**（マネフォME はカテゴリを後から編集でき、含めると編集のたび別 ID 化して二重追記されるため）。自然キー `date-content-amount-source` が衝突する取引には出現順 occurrence(0,1,2…) を付与し、同日・同額・同口座・同内容の別取引（例: 同日に ¥10,000 ATM 出金を2回）も別 ID として保持する。occurrence は「スクレイプ時の MF 返却順」から毎 run 決定的に同値が得られるため二重追記も防ぐ。ハッシュ方式変更時の移行は「シート値から ID 再計算」（旧 `remap-ids`）が**廃止**された（過去フル同期が金額を `¥` 付きで保存しており現行スクレイパ出力と一致せず破綻するため）。代わりに「再 `npm run sync` → `npm run dedupe-rows`」で旧 ID 行を素性ベースに除去する（DEPLOY_GUIDE §8.6）。**残余エッジ**: MF が同一自然キー取引の相対並び順を run 間で入れ替えた場合のみ、当該取引が一度だけ再追記され得る（無言の取りこぼしより検知容易） |
 | B | 日付 | string (`YYYY/MM/DD`) | 取引日 |
 | C | 内容 | string | 取引内容 |
 | D | 金額 | string (Sheets が数値推論) | 円。マイナス = 支出 |

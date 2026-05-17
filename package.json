@@ -22,7 +22,7 @@
     "login": "tsx app/cli.ts login",
     "check-session": "tsx app/cli.ts check-session",
     "health-check": "tsx app/cli.ts health-check",
-    "remap-ids": "tsx scripts/remap-transaction-ids.ts",
+    "dedupe-rows": "tsx scripts/dedupe-transaction-rows.ts",
     "playwright:install": "playwright install chromium"
   },
   "dependencies": {

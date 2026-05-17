@@ -17,6 +17,7 @@ data/storage-state.json
 
 # --- Runtime data ---
 data/snapshots/
+logs/
 *.log
 run_log.txt
 
