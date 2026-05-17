@@ -98,8 +98,12 @@ function ymLabel(idx: number): string {
 }
 
 /**
- * 誕生日と対象年月から満年齢。月次モデルなので「誕生月に達したら新年齢」
- * （日割りしない）。例: 1977/03 生は 2042/03 で 65 歳（年金開始月）。
+ * 誕生日と対象年月から満年齢。GAS の `DATEDIF(誕生日, 当月1日, "Y")` と
+ * 同一にする（パリティの権威は再生成済み Sheets）。月次モデルでは対象日は
+ * 常に「当月1日」なので、誕生日の日が2日以降なら誕生月の1日時点では
+ * まだ誕生日が来ておらず加齢しない。
+ * 例: 1977/03/09 生は 2042/03/01 ではまだ64歳、2042/04 で65歳
+ *     ＝ GAS の年金開始 `IF(1日 >= EDATE(誕生日,12*65)=2042/03/09)` と一致。
  */
 function ageAt(
   birth: { y: number; m: number; d: number },
@@ -108,6 +112,7 @@ function ageAt(
 ): number {
   let age = y - birth.y;
   if (m < birth.m) age -= 1;
+  else if (m === birth.m && birth.d > 1) age -= 1;
   return age;
 }
 
