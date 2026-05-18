@@ -26,6 +26,10 @@
     font-size: 13px; margin-bottom: 2px; }
   .sld input[type=range] { width: 100%; }
   .sld .val { font-variant-numeric: tabular-nums; font-weight: 600; }
+  .sld-group { font-size: 12px; font-weight: 700; color: #555;
+    margin: 14px 0 4px; padding-bottom: 2px; border-bottom: 1px solid #ddd;
+    letter-spacing: .04em; }
+  .sld-group:first-child { margin-top: 0; }
   .profiles { margin-bottom: 8px; font-size: 13px; }
   .legend { font-size: 12px; margin-top: 6px; }
   .legend .b { color: #1565c0; } .legend .o { color: #e65100; }
@@ -121,9 +125,10 @@ var PROFILE = "__PROFILE_DEFAULT__";
     var rows = res.monthly, n = rows.length;
     if (!n) return;
 
-    // 縦軸は 0 起点・期末資産（青）に合わせてスケール。FIRE必要資産（橙）は
-    // 序盤に巨大化するが Y 軸に全部収める必要はなく、上端を超えたら頭打ちで
-    // はみ出させる（資産トラジェクトリを潰さず読めるようにするため）。
+    // 縦軸は 0 起点・期末資産（青）に合わせてスケール。可視域 [0, top] の
+    // 外（序盤の巨大な FIRE必要資産＝上端超、枯渇後の負の期末資産＝0未満）
+    // は描かず途切れさせる。偽の水平線（上端/0 への張り付き）を出さない。
+    // 枯渇は赤い縦ラベルで別途明示。
     var hiData = 0;
     for (var i = 0; i < n; i++) {
       if (rows[i].endAssets > hiData) hiData = rows[i].endAssets;
@@ -165,14 +170,14 @@ var PROFILE = "__PROFILE_DEFAULT__";
       ctx.fillText(yr, gx, H - padB + 6);
     }
 
-    // 可視域 [0, top] の外（特に序盤の巨大な FIRE必要資産）は描かず途切れ
-    // させる。Y 軸最大に張り付いた偽の水平線を出さないため。
+    // 可視域 [0, top] の外は描かず途切れさせる：序盤の巨大な FIRE必要資産
+    // （> top）も、枯渇後の負の期末資産（< 0）も、偽の水平線にしない。
     function line(getter, color) {
       ctx.strokeStyle = color; ctx.lineWidth = 2; ctx.beginPath();
       var started = false;
       for (var i = 0; i < n; i++) {
         var v = getter(rows[i]);
-        if (v == null || v > top) { started = false; continue; }
+        if (v == null || v > top || v < 0) { started = false; continue; }
         var px = X(i), py = Y(v);
         if (!started) { ctx.moveTo(px, py); started = true; } else ctx.lineTo(px, py);
       }
@@ -206,11 +211,11 @@ var PROFILE = "__PROFILE_DEFAULT__";
       ctx.strokeStyle = "#9e9e9e"; ctx.setLineDash([2, 2]);
       ctx.beginPath(); ctx.moveTo(hx, padT); ctx.lineTo(hx, H - padB); ctx.stroke();
       ctx.setLineDash([]);
-      if (rr.endAssets <= top) {
+      if (rr.endAssets >= 0 && rr.endAssets <= top) {
         ctx.fillStyle = "#1565c0";
         ctx.beginPath(); ctx.arc(hx, Y(rr.endAssets), 3.5, 0, 7); ctx.fill();
       }
-      if (rr.fireNeed != null && rr.fireNeed <= top) {
+      if (rr.fireNeed != null && rr.fireNeed >= 0 && rr.fireNeed <= top) {
         ctx.fillStyle = "#e65100";
         ctx.beginPath(); ctx.arc(hx, Y(rr.fireNeed), 3.5, 0, 7); ctx.fill();
       }
@@ -289,8 +294,15 @@ var PROFILE = "__PROFILE_DEFAULT__";
   function renderSliders() {
     var box = document.getElementById("sliders");
     box.innerHTML = "";
+    var curGroup = null;
     SLIDERS.filter(function (s) { return s.profiles.indexOf(PROFILE) >= 0; })
       .forEach(function (s) {
+        if (s.group !== curGroup) {
+          curGroup = s.group;
+          var hd = document.createElement("div");
+          hd.className = "sld-group"; hd.textContent = s.group;
+          box.appendChild(hd);
+        }
         var wrap = document.createElement("div"); wrap.className = "sld";
         var lab = document.createElement("label");
         var name = document.createElement("span"); name.textContent = s.label;

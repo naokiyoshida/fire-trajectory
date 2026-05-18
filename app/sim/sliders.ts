@@ -2,15 +2,19 @@
  * UI に出すスライダー定義（宣言的・データ駆動）。
  *
  * engine は常に全 SimParams でフル精度計算する。ここは「どの項目をスライダーに
- * 出すか／範囲／プロファイル」だけを定義する。スライダーの追加・範囲変更・
- * プロファイル変更はこの配列の1行編集で済み、engine/UI コードは触らない。
+ * 出すか／範囲／プロファイル／分類」だけを定義する。スライダーの追加・範囲変更・
+ * プロファイル変更・分類変更はこの配列の1行編集で済み、engine/UI コードは触らない。
  *
  * profile: "simple" = 将来のスマホ向け最小セット, "detailed" = PC 既定。
  * "simple" は "detailed" の部分集合（simple は detailed にも含める）。
+ * group: UI で見出し付きにまとめる分類。配列はこの分類順に並べる
+ *   （renderSliders は配列順のまま、group が変わる箇所で見出しを差し込む）。
  */
 import type { SimParams } from "./engine.js";
 
 export type SliderProfile = "simple" | "detailed";
+
+export type SliderGroup = "市場前提" | "生活費・支出" | "本人" | "配偶者";
 
 export interface SliderDef {
   /** SimParams の数値キー */
@@ -35,9 +39,12 @@ export interface SliderDef {
   /** 表示単位 ("%" は値×100 表示、"万円" は値/10000 表示) */
   unit: "%" | "円" | "万円" | "歳";
   profiles: SliderProfile[];
+  /** UI 見出し分類（配列はこの分類が連続するよう並べる） */
+  group: SliderGroup;
 }
 
 export const SLIDERS: SliderDef[] = [
+  // ── 市場前提 ──
   {
     key: "nominalYield",
     label: "運用利回り(名目)",
@@ -46,6 +53,7 @@ export const SLIDERS: SliderDef[] = [
     step: 0.005,
     unit: "%",
     profiles: ["simple", "detailed"],
+    group: "市場前提",
   },
   {
     key: "inflation",
@@ -55,7 +63,9 @@ export const SLIDERS: SliderDef[] = [
     step: 0.005,
     unit: "%",
     profiles: ["simple", "detailed"],
+    group: "市場前提",
   },
+  // ── 生活費・支出 ──
   {
     key: "baseLivingMonthly",
     label: "基本生活費(月)",
@@ -64,60 +74,7 @@ export const SLIDERS: SliderDef[] = [
     step: 10000,
     unit: "万円",
     profiles: ["simple", "detailed"],
-  },
-  {
-    key: "selfPensionStartAge",
-    label: "本人 年金開始年齢",
-    min: 60,
-    max: 75,
-    step: 1,
-    unit: "歳",
-    profiles: ["simple", "detailed"],
-  },
-  {
-    key: "spousePensionStartAge",
-    label: "配偶者 年金開始年齢",
-    min: 60,
-    max: 75,
-    step: 1,
-    unit: "歳",
-    profiles: ["detailed"],
-  },
-  {
-    key: "selfMonthlyIncome",
-    label: "本人 月収(家計入金)",
-    min: 0,
-    max: 600000,
-    step: 10000,
-    unit: "万円",
-    profiles: ["detailed"],
-  },
-  {
-    key: "selfBonusAnnual",
-    label: "本人 賞与年額(家計入金)",
-    min: 0,
-    max: 3000000,
-    step: 100000,
-    unit: "万円",
-    profiles: ["detailed"],
-  },
-  {
-    key: "selfPensionAnnual",
-    label: "本人 年金年額",
-    min: 0,
-    max: 4000000,
-    step: 100000,
-    unit: "万円",
-    profiles: ["detailed"],
-  },
-  {
-    key: "spousePensionAnnual",
-    label: "配偶者 年金年額",
-    min: 0,
-    max: 4000000,
-    step: 100000,
-    unit: "万円",
-    profiles: ["detailed"],
+    group: "生活費・支出",
   },
   {
     key: "loanMonthly",
@@ -127,6 +84,7 @@ export const SLIDERS: SliderDef[] = [
     step: 10000,
     unit: "万円",
     profiles: ["detailed"],
+    group: "生活費・支出",
   },
   {
     key: "childSupportMonthly",
@@ -136,5 +94,68 @@ export const SLIDERS: SliderDef[] = [
     step: 10000,
     unit: "万円",
     profiles: ["detailed"],
+    group: "生活費・支出",
+  },
+  // ── 本人 ──
+  {
+    key: "selfMonthlyIncome",
+    label: "本人 月収(家計入金)",
+    min: 0,
+    max: 600000,
+    step: 10000,
+    unit: "万円",
+    profiles: ["detailed"],
+    group: "本人",
+  },
+  {
+    key: "selfBonusAnnual",
+    label: "本人 賞与年額(家計入金)",
+    min: 0,
+    max: 3000000,
+    step: 100000,
+    unit: "万円",
+    profiles: ["detailed"],
+    group: "本人",
+  },
+  {
+    key: "selfPensionAnnual",
+    label: "本人 年金年額",
+    min: 0,
+    max: 4000000,
+    step: 100000,
+    unit: "万円",
+    profiles: ["detailed"],
+    group: "本人",
+  },
+  {
+    key: "selfPensionStartAge",
+    label: "本人 年金開始年齢",
+    min: 60,
+    max: 75,
+    step: 1,
+    unit: "歳",
+    profiles: ["simple", "detailed"],
+    group: "本人",
+  },
+  // ── 配偶者 ──
+  {
+    key: "spousePensionAnnual",
+    label: "配偶者 年金年額",
+    min: 0,
+    max: 4000000,
+    step: 100000,
+    unit: "万円",
+    profiles: ["detailed"],
+    group: "配偶者",
+  },
+  {
+    key: "spousePensionStartAge",
+    label: "配偶者 年金開始年齢",
+    min: 60,
+    max: 75,
+    step: 1,
+    unit: "歳",
+    profiles: ["detailed"],
+    group: "配偶者",
   },
 ];
