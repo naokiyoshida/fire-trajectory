@@ -121,19 +121,19 @@ var PROFILE = "__PROFILE_DEFAULT__";
     var rows = res.monthly, n = rows.length;
     if (!n) return;
 
-    // 縦軸は 0 起点（0 より下は表示しない）。上端は最大値のキリのよい目盛り。
+    // 縦軸は 0 起点・期末資産（青）に合わせてスケール。FIRE必要資産（橙）は
+    // 序盤に巨大化するが Y 軸に全部収める必要はなく、上端を超えたら頭打ちで
+    // はみ出させる（資産トラジェクトリを潰さず読めるようにするため）。
     var hiData = 0;
     for (var i = 0; i < n; i++) {
       if (rows[i].endAssets > hiData) hiData = rows[i].endAssets;
-      var fv = rows[i].fireNeed;
-      if (fv != null && fv > hiData) hiData = fv;
     }
     if (hiData <= 0) hiData = 1;
     var ticks = niceTicks(hiData);
     var top = ticks[ticks.length - 1];
 
     function X(i) { return padL + (W - padL - padR) * (n === 1 ? 0 : i / (n - 1)); }
-    function Y(v) { var c = v < 0 ? 0 : v; return padT + (H - padT - padB) * (1 - c / top); }
+    function Y(v) { var c = v < 0 ? 0 : v; var y = padT + (H - padT - padB) * (1 - c / top); return y < padT ? padT : y; }
     layout = { n: n, X: X, Y: Y, padL: padL, padR: padR, W: W };
 
     // Y 目盛り＋横グリッド＋値ラベル
@@ -145,13 +145,18 @@ var PROFILE = "__PROFILE_DEFAULT__";
       ctx.fillStyle = "#666"; ctx.textAlign = "right";
       ctx.fillText(moneyLabel(ticks[k]), padL - 6, ty);
     }
-    // X 目盛り（年ラベル）。年初 or 約8等分でグリッド＋西暦。
+    // X 目盛り（年ラベル）。描画幅から最大本数を見積もり N 年おきに間引く。
+    // 細かい値はマウスオーバーで読めるので粗い目盛りで十分（重なり防止）。
     ctx.textAlign = "center"; ctx.textBaseline = "top";
-    var lastYr = null, xstep = Math.max(1, Math.round(n / 8));
+    var firstYr = +rows[0].ym.slice(0, 4);
+    var spanYr = Math.max(1, (+rows[n - 1].ym.slice(0, 4)) - firstYr);
+    var maxLabels = Math.max(2, Math.floor((W - padL - padR) / 56));
+    var yearStride = Math.max(1, Math.ceil(spanYr / maxLabels));
+    var lastYr = null;
     for (var x = 0; x < n; x++) {
       var yr = rows[x].ym.slice(0, 4);
-      var isJan = rows[x].ym.slice(5) === "01" && yr !== lastYr;
-      if (!isJan && x % xstep !== 0) continue;
+      if (rows[x].ym.slice(5) !== "01" || yr === lastYr) continue;
+      if ((+yr - firstYr) % yearStride !== 0) continue;
       lastYr = yr;
       var gx = X(x);
       ctx.strokeStyle = "#f3f3f3";

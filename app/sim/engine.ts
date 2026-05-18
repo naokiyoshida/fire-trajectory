@@ -13,9 +13,13 @@
  * 【自己整合モデル §4.3】I列は「その月に退職したら」を問う指標なので、
  * 退職後社会保険料は selfRetireDate ではなく**当月以降ずっと**発生する前提で
  * 計上する（就労プランの E列＝期末資産トラジェクトリとは別の支出系列）。
- * FIRE可能時期は「以降ずっと 期末資産≥必要資産 を維持する最初の月」
- * （初接触ではない）。verdict はその時退職した場合の終了資産で判定し、
- * FIRE可能時期と矛盾しない。これにより engine はレガシー GAS シミュとは
+ * FIRE可能時期は「その月に退職した場合、年金のみ・退職後支出・一時金なしで
+ * 前進シミュした終了年齢資産が fireTargetRemain 以上になる最初の月」。
+ * I列の意味（到達＝その月に辞めれば成立）と厳密に一致し、就労プランの
+ * E列が FIRE後に I列を割り込んでも（＝そのまま働き続けてから退職予定日に
+ * 辞めた場合の軌道が落ちても）「その月に辞める」判断とは無関係なので
+ * FIRE可能時期は揺らがない。verdict も同一の前進シミュ（fireEndAssets）で
+ * 判定するので両者は常に整合する。これにより engine はレガシー GAS シミュとは
  * 設計上意図的に乖離する（engine が唯一の正・GAS シミュは撤去対象）。
  */
 
@@ -78,8 +82,9 @@ export interface SimMonth {
 export interface SimResult {
   monthly: SimMonth[];
   /**
-   * 「以降ずっと 期末資産≥FIRE必要資産 を維持する最初の月」("YYYY/MM")。
-   * この月に退職すれば年金のみで目標年齢まで持つ＝FIRE可能時期。null＝到達せず。
+   * 「その月に退職した場合、年金のみ・退職後支出・一時金なしで前進シミュした
+   * 終了年齢資産が fireTargetRemain 以上になる最初の月」("YYYY/MM")。
+   * ＝その月に辞めれば目標年齢まで持つ＝FIRE可能時期。null＝到達せず。
    */
   fireDate: string | null;
   ageAtFire: number | null;
@@ -252,33 +257,6 @@ export function simulate(p: SimParams): SimResult {
   }
 
   // --- 派生指標 ---
-  // FIRE可能時期 = 「以降ずっと 期末資産≥必要資産 を維持する最初の月」。
-  // 一時的に超えてもその後割り込むなら不可（最後に割り込んだ次の有効月が答え）。
-  let lastFail = -1;
-  let lastNonNull = -1;
-  let depletionMonth: string | null = null;
-  for (let t = 0; t < totalMonths; t++) {
-    const r = rows[t];
-    if (r === undefined) continue;
-    if (depletionMonth === null && r.endAssets < 0) depletionMonth = r.ym;
-    if (r.fireNeed === null) continue;
-    lastNonNull = t;
-    if (r.endAssets < r.fireNeed) lastFail = t;
-  }
-  let fireDate: string | null = null;
-  let ageAtFire: number | null = null;
-  let fireIdx = -1;
-  if (lastNonNull >= 0 && lastFail < lastNonNull) {
-    for (let t = lastFail + 1; t < totalMonths; t++) {
-      const r = rows[t];
-      if (r === undefined || r.fireNeed === null) continue;
-      fireDate = r.ym;
-      ageAtFire = r.ageSelf;
-      fireIdx = t;
-      break;
-    }
-  }
-
   // 終了年齢アンカー（本人が simEndAge に達する最初の月、無ければ最終行）
   let anchor = totalMonths - 1;
   for (let t = 0; t < totalMonths; t++) {
@@ -287,21 +265,56 @@ export function simulate(p: SimParams): SimResult {
       break;
     }
   }
-  // 就労プラン（リタイア予定日まで就労）の終了年齢時点資産（参考・透明性）
-  const endAssetsAtSimEnd = rows[anchor]?.endAssets ?? 0;
 
-  // fireDate に退職した場合の終了年齢資産（年金のみ・退職済み支出・一時金なし）。
-  // verdict をこれで判定することで FIRE可能時期と矛盾しない。
-  let fireEndAssets: number | null = null;
-  if (fireIdx >= 0) {
-    let a = rows[fireIdx]?.openAssets ?? p.currentAssets;
-    for (let t = fireIdx; t <= anchor; t++) {
+  // 就労プラン（リタイア予定日まで就労）で期末資産が初めて負になる月（参考・透明性）
+  let depletionMonth: string | null = null;
+  for (let t = 0; t < totalMonths; t++) {
+    const r = rows[t];
+    if (r === undefined) continue;
+    if (r.endAssets < 0) {
+      depletionMonth = r.ym;
+      break;
+    }
+  }
+
+  // 「その月に退職した場合」の前進シミュ（年金のみ・退職後支出・一時金なし）。
+  // 各月の期首資産から anchor まで回し、終了年齢時点の資産を返す。
+  // I列（FIRE必要資産）の意味と一致する評価軸＝この値が fireTargetRemain 以上
+  // なら、その月に辞めて年金のみで目標年齢まで持つ。
+  const retireSurvivalEnd = (fromIdx: number): number => {
+    let a = rows[fromIdx]?.openAssets ?? p.currentAssets;
+    for (let t = fromIdx; t <= anchor; t++) {
       const inc = pensionRealArr[t] ?? 0;
       const exp = retiredExpenseNomArr[t] ?? 0;
       a = (a + inc - exp) * (1 + rm);
     }
-    fireEndAssets = a;
+    return a;
+  };
+
+  // FIRE可能時期 = その前進シミュが fireTargetRemain 以上になる最初の月。
+  // 就労プランの E列がこの後 I列を割り込んでも（働き続けて退職予定日に辞めた
+  // 場合の軌道の話なので）「その月に辞める」判断とは無関係。初接触で確定する。
+  let fireDate: string | null = null;
+  let ageAtFire: number | null = null;
+  let fireIdx = -1;
+  for (let t = 0; t < totalMonths; t++) {
+    const r = rows[t];
+    if (r === undefined || r.fireNeed === null) continue;
+    if (retireSurvivalEnd(t) >= p.fireTargetRemain) {
+      fireDate = r.ym;
+      ageAtFire = r.ageSelf;
+      fireIdx = t;
+      break;
+    }
   }
+
+  // 就労プラン（リタイア予定日まで就労）の終了年齢時点資産（参考・透明性）
+  const endAssetsAtSimEnd = rows[anchor]?.endAssets ?? 0;
+
+  // fireDate に退職した場合の終了年齢資産。verdict をこれで判定することで
+  // FIRE可能時期と必ず整合する（同一の前進シミュ）。
+  const fireEndAssets: number | null =
+    fireIdx >= 0 ? retireSurvivalEnd(fireIdx) : null;
 
   let verdict: SimResult["verdict"];
   if (fireDate === null) {

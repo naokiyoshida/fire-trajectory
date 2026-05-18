@@ -108,8 +108,8 @@ describe("simulate", () => {
   });
 });
 
-// 収入ゼロで資産が枯渇するシナリオ。どの月も必要ラインを超えないので
-// sustained 判定で fireDate=null、verdict=未達、fireEndAssets=null。
+// 収入ゼロで資産が枯渇するシナリオ。どの月に退職しても前進シミュが
+// 目標年齢まで持たないので fireDate=null、verdict=未達、fireEndAssets=null。
 const DEPLETE: SimParams = {
   ...P,
   currentAssets: 2_000_000,
@@ -125,7 +125,7 @@ const DEPLETE: SimParams = {
 describe("simulate: 枯渇シナリオ", () => {
   const r = simulate(DEPLETE);
 
-  it("どの月も必要ライン未満 → FIRE 不可・未達・fireEndAssets なし", () => {
+  it("どの月に退職しても持たない → FIRE 不可・未達・fireEndAssets なし", () => {
     expect(r.fireDate).toBeNull();
     expect(r.ageAtFire).toBeNull();
     expect(r.fireEndAssets).toBeNull();
@@ -194,5 +194,64 @@ describe("simulate: フィッシャー実質利回り（名目>0・インフレ>
       ((m0?.openAssets ?? 0) + (m0?.net ?? 0)) * (1 + rmExpected),
       4,
     );
+  });
+});
+
+// 旧「以降ずっと割り込まない」ルールが返していた誤り（到達しても未達）の回帰防止。
+// 就労プランの E列が FIRE後に I列を割り込んでも、その月に退職すれば年金で
+// 目標年齢まで持つなら FIRE可能時期は早い月で確定する。
+// 構成: 2026/03 退職・高給与で序盤に資産を積み、2027/01（47歳）から年金開始。
+// 退職後の無年金ギャップで E列は I列を割り込むが、2026/04 に退職すれば
+// ギャップを越えて年金期に net=0 で持ち切るため、そこが FIRE可能時期。
+// 旧ルールは割り込みを見て 2027/01 まで遅延させていた（9ヶ月の誤差）。
+const GAP: SimParams = {
+  asOf: "2026-01-01",
+  currentAssets: 2_000_000,
+  baseLivingMonthly: 200_000,
+  loanMonthly: 0,
+  loanEndDate: "2000-01-01",
+  childSupportMonthly: 0,
+  childSupportEndDate: "2000-01-01",
+  postRetireInsuranceMonthly: 100_000,
+  nominalYield: 0,
+  inflation: 0,
+  fireSolidThreshold: 100_000_000,
+  fireComfortThreshold: 50_000_000,
+  fireTargetAge: 48,
+  fireTargetRemain: 0,
+  simEndAge: 48,
+  selfBirth: "1980-01-01",
+  selfRetireDate: "2026-03-01",
+  selfMonthlyIncome: 500_000,
+  selfBonusAnnual: 0,
+  selfRetireLump: 0,
+  selfPensionAnnual: 3_600_000,
+  selfPensionStartAge: 47,
+  spouseBirth: "1980-01-01",
+  spouseRetireDate: "2000-01-01",
+  spouseMonthlyIncome: 0,
+  spouseBonusAnnual: 0,
+  spouseRetireLump: 0,
+  spousePensionAnnual: 0,
+  spousePensionStartAge: 100,
+};
+
+describe("simulate: E列が FIRE後に I列を割り込んでも fireDate は早い月で確定", () => {
+  const r = simulate(GAP);
+  const at = (ym: string) => r.monthly.find((m) => m.ym === ym);
+
+  it("fireDate は退職して年金まで持ち切れる最初の月（2026/04・46歳）", () => {
+    expect(r.fireDate).toBe("2026/04");
+    expect(r.ageAtFire).toBe(46);
+    expect(r.fireEndAssets).toBe(200_000); // 年金のみ前進シミュの終了年齢資産
+    expect(r.verdict).not.toBe("未達"); // fireDate があれば未達にならない
+    expect(r.verdict).toBe("達成");
+  });
+
+  it("FIRE後の月でも就労プラン E列は I列を割り込む（旧ルールの誤判定経路）", () => {
+    const f = at("2026/04"); // = fireDate 当月
+    expect(f?.endAssets).toBe(2_600_000);
+    expect(f?.fireNeed).toBe(2_700_000);
+    expect((f?.endAssets ?? 0) < (f?.fireNeed ?? 0)).toBe(true);
   });
 });
