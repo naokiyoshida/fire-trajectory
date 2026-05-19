@@ -95,15 +95,19 @@ var PROFILE = "__PROFILE_DEFAULT__";
     if (Math.abs(v) >= 1e4) return Math.round(v / 1e4).toLocaleString() + "万";
     return String(Math.round(v));
   }
-  // 0..max を「キリのよい」目盛り列に（5本前後）
+  // 0..max を「キリのよい」目盛り列に（5本前後）。最上段の目盛りは必ず
+  // max 以上にする：従来は終了条件の切り捨てで top<max になり得て、
+  // スライダー操作で期末資産ピークが top を超え、line() の v>top スキップで
+  // グラフが上に突き抜けて見えなくなる不具合があった（インフレ0% 等で再現）。
   function niceTicks(max) {
     if (max <= 0) return [0, 1];
     var rough = max / 4;
     var pow = Math.pow(10, Math.floor(Math.log(rough) / Math.LN10));
     var u = rough / pow;
     var step = (u >= 5 ? 10 : u >= 2 ? 5 : u >= 1 ? 2 : 1) * pow;
+    var topTick = Math.ceil(max / step - 1e-9) * step; // 必ず max 以上
     var ticks = [];
-    for (var t = 0; t <= max + step * 0.5; t += step) ticks.push(t);
+    for (var t = 0; t <= topTick + step * 0.5; t += step) ticks.push(t);
     return ticks;
   }
   // CSS サイズ × devicePixelRatio でバッキングストアを設定（Retina/スマホで鮮明に）
