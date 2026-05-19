@@ -13,6 +13,10 @@
  * 【自己整合モデル §4.3】I列は「その月に退職したら」を問う指標なので、
  * 退職後社会保険料は selfRetireDate ではなく**当月以降ずっと**発生する前提で
  * 計上する（就労プランの E列＝期末資産トラジェクトリとは別の支出系列）。
+ * インフレ前提は E列と統一する：支出は実質固定（÷deflator しない＝生活費は
+ * 購買力一定）、年金のみ名目固定（pensionReal で÷deflator）。これにより青
+ * （期末資産）と橙（I列）が同一の漸化式となり、傾きの振る舞いが整合する
+ * （かつて I列だけ支出を÷deflator していた非対称を撤去）。
  * FIRE可能時期は「その月に退職した場合、年金のみ・退職後支出・一時金なしで
  * 前進シミュした終了年齢資産が fireTargetRemain 以上になる最初の月」。
  * I列の意味（到達＝その月に辞めれば成立）と厳密に一致し、就労プランの
@@ -165,9 +169,10 @@ export function simulate(p: SimParams): SimResult {
   const rows: SimMonth[] = [];
   // 年金実質は I列逆算でも使うので別途保持
   const pensionRealArr: number[] = [];
-  // I列用「退職済み前提」の支出（名目／実質）。就労プランの expense とは別系列。
-  const retiredExpenseNomArr: number[] = [];
-  const iColExpenseRealArr: number[] = [];
+  // I列用「退職済み前提」の支出。就労プランの expense とは系列が別（退職後
+  // 社会保険料を当月以降ずっと計上）だが、インフレの扱いは E列と同じ
+  // 「実質固定」（÷deflator しない）。年金のみ名目固定（pensionReal で÷deflator）。
+  const retiredExpenseArr: number[] = [];
   const ageSelfArr: number[] = [];
 
   let prevEnd = p.currentAssets;
@@ -227,14 +232,15 @@ export function simulate(p: SimParams): SimResult {
     pensionRealArr.push(pensionReal);
     // §4.3 自己整合: I列は「この月に退職した」前提なので退職後社会保険料は
     // selfRetireDate ではなく当月以降ずっと計上する（ローン/息子支援は各終了日
-    // 依存のまま）。E列は名目固定なので実質化（÷deflator）して保持。
+    // 依存のまま）。インフレ前提は E列（就労プランの expense）と統一し、支出は
+    // 実質固定＝÷deflator しない（生活費は購買力一定。名目固定で実質目減りさせ
+    // ない）。これにより青(期末資産)と橙(I列)が同一の動学になり整合する。
     const retiredExpense =
       p.baseLivingMonthly +
       (idx <= loanEndIdx ? p.loanMonthly : 0) +
       (idx <= childEndIdx ? p.childSupportMonthly : 0) +
       p.postRetireInsuranceMonthly;
-    retiredExpenseNomArr.push(retiredExpense);
-    iColExpenseRealArr.push(retiredExpense / deflator);
+    retiredExpenseArr.push(retiredExpense);
     ageSelfArr.push(ageSelf);
   }
 
@@ -251,7 +257,7 @@ export function simulate(p: SimParams): SimResult {
     const need =
       nextReq / (1 + rm) -
       (pensionRealArr[t] ?? 0) +
-      (iColExpenseRealArr[t] ?? 0);
+      (retiredExpenseArr[t] ?? 0);
     row.fireNeed = need;
     nextReq = need;
   }
@@ -285,7 +291,7 @@ export function simulate(p: SimParams): SimResult {
     let a = rows[fromIdx]?.openAssets ?? p.currentAssets;
     for (let t = fromIdx; t <= anchor; t++) {
       const inc = pensionRealArr[t] ?? 0;
-      const exp = retiredExpenseNomArr[t] ?? 0;
+      const exp = retiredExpenseArr[t] ?? 0;
       a = (a + inc - exp) * (1 + rm);
     }
     return a;

@@ -255,3 +255,52 @@ describe("simulate: E列が FIRE後に I列を割り込んでも fireDate は早
     expect((f?.endAssets ?? 0) < (f?.fireNeed ?? 0)).toBe(true);
   });
 });
+
+// 回帰: インフレ>0 でも I列の支出は実質固定（÷deflator しない）。青（期末資産）
+// と同じインフレ前提に統一した整合修正を固定する。n=i で rm=0・
+// deflator=(1.05)^(t/12)≠1・年金0・退職済み。旧実装（支出÷deflator）なら
+// I列の月次増分が deflator で目減りし「毎月ちょうど +baseLiving」の等差が
+// 崩れるので回帰検出できる。
+const INFL: SimParams = {
+  ...P,
+  currentAssets: 1_000_000,
+  baseLivingMonthly: 200_000,
+  postRetireInsuranceMonthly: 0,
+  nominalYield: 0.05,
+  inflation: 0.05, // n=i → rm=0、ただし deflator=(1.05)^(t/12)≠1
+  selfRetireDate: "2000-01-01", // 過去＝就労収入なし
+  selfMonthlyIncome: 0,
+  selfRetireLump: 0,
+  selfPensionAnnual: 0,
+  selfPensionStartAge: 100,
+  fireTargetAge: 47,
+  simEndAge: 47,
+};
+
+describe("simulate: インフレ>0 でも I列支出は実質固定（青と整合・回帰）", () => {
+  const r = simulate(INFL);
+  const need = r.monthly.filter((x) => x.fireNeed != null);
+  const last = need[need.length - 1];
+  const prev = need[need.length - 2];
+
+  it("rm=0（n=i）かつ deflator≠1（回帰が成立する前提）", () => {
+    expect(r.monthly[0]?.realMonthlyYield).toBeCloseTo(0, 12);
+    expect(last?.deflator ?? 0).toBeGreaterThan(1.0001);
+  });
+
+  it("I列の月次増分は deflator に依らず厳密に baseLiving（実質固定）", () => {
+    // 末尾: nextReq(=fireTargetRemain 0)/(1+0) − 年金0 + 支出20万 = 20万
+    expect(last?.fireNeed).toBe(200_000);
+    // 1つ前: 20万 + 20万 = 40万（旧実装なら 20万 + 20万/deflator で ≠40万）
+    expect(prev?.fireNeed).toBe(400_000);
+    expect((prev?.fireNeed ?? 0) - (last?.fireNeed ?? 0)).toBe(200_000);
+    expect(last?.fireNeed).toBe(
+      fireNeedValue({
+        nextReq: 0,
+        monthlyRealYield: 0,
+        pensionReal: 0,
+        expenseReal: 200_000,
+      }),
+    );
+  });
+});
