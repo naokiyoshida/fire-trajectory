@@ -48,6 +48,13 @@ export interface SimParams {
   /** 本人 */
   selfBirth: string;
   selfRetireDate: string;
+  /**
+   * 任意。指定時は selfRetireDate より優先し、退職を「本人が誕生月に
+   * この年齢になる月」で定義する（UI スライダー用・年金開始年齢と同流儀）。
+   * 未指定なら従来どおり selfRetireDate を使う（既存挙動・後方互換）。
+   * シート読み込み時は selfRetireDate から defaultRetireAge() で既定値を補う。
+   */
+  selfRetireAge?: number;
   selfMonthlyIncome: number;
   selfBonusAnnual: number;
   selfRetireLump: number;
@@ -116,6 +123,23 @@ function monthIndex(y: number, m: number): number {
   return y * 12 + (m - 1);
 }
 
+/**
+ * selfRetireDate（＋本人誕生日）から UI スライダー既定の退職年齢を導く。
+ * simulate の年齢パス `monthIndex(birth.y+age, birth.m)` の逆写像で、
+ * 誕生月＝退職日の月の通常ケースは厳密一致（端数年はその年に丸め）。
+ * ロジックを engine 内に置き写像と逆写像のドリフトを不能にする。
+ */
+export function defaultRetireAge(
+  selfBirthIso: string,
+  selfRetireDateIso: string,
+): number {
+  const b = parseYmd(selfBirthIso);
+  const r = parseYmd(selfRetireDateIso);
+  return Math.round(
+    (monthIndex(r.y, r.m) - monthIndex(b.y, b.m)) / 12,
+  );
+}
+
 /** 月通し番号 → "YYYY/MM" */
 function ymLabel(idx: number): string {
   const y = Math.floor(idx / 12);
@@ -152,7 +176,13 @@ export function simulate(p: SimParams): SimResult {
   const childEnd = parseYmd(p.childSupportEndDate);
 
   const startIdx = monthIndex(asOf.y, asOf.m);
-  const selfRetireIdx = monthIndex(selfRetire.y, selfRetire.m);
+  // selfRetireAge 指定時は「誕生月にその年齢になる月」を退職月（＝最終就労月）
+  // とする。未指定なら従来どおり selfRetireDate の月。defaultRetireAge() が
+  // この写像の逆（日付→既定年齢）で、誕生月＝退職日月の通常ケースは厳密一致。
+  const selfRetireIdx =
+    p.selfRetireAge != null
+      ? monthIndex(selfBirth.y + p.selfRetireAge, selfBirth.m)
+      : monthIndex(selfRetire.y, selfRetire.m);
   const spouseRetireIdx = monthIndex(spouseRetire.y, spouseRetire.m);
   const loanEndIdx = monthIndex(loanEnd.y, loanEnd.m);
   const childEndIdx = monthIndex(childEnd.y, childEnd.m);

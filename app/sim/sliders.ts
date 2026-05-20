@@ -25,6 +25,7 @@ export interface SliderDef {
     | "baseLivingMonthly"
     | "loanMonthly"
     | "childSupportMonthly"
+    | "selfRetireAge"
     | "selfMonthlyIncome"
     | "selfBonusAnnual"
     | "selfPensionStartAge"
@@ -97,6 +98,16 @@ export const SLIDERS: SliderDef[] = [
     group: "生活費・支出",
   },
   // ── 本人 ──
+  {
+    key: "selfRetireAge",
+    label: "本人 退職年齢",
+    min: 45,
+    max: 75,
+    step: 1,
+    unit: "歳",
+    profiles: ["simple", "detailed"],
+    group: "本人",
+  },
   {
     key: "selfMonthlyIncome",
     label: "本人 月収(家計入金)",

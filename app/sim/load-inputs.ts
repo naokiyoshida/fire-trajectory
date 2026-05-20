@@ -7,7 +7,7 @@
 import { logger } from "../core/logger.js";
 import type { SheetsClient } from "../core/sheets-client.js";
 import { quoteSheetName } from "../core/sheets-client.js";
-import type { SimParams } from "./engine.js";
+import { defaultRetireAge, type SimParams } from "./engine.js";
 
 export const SETTINGS_SHEET_NAME = "設定";
 
@@ -123,6 +123,13 @@ export function buildSimParams(
       `設定シートに必須項目がありません: ${missingRequired.join(", ")}`,
     );
   }
+  // UI 退職年齢スライダーの既定。selfBirth/selfRetireDate は必須なので
+  // ここでは必ず存在する。engine の年齢パスと逆写像なので通常ケースは
+  // selfRetireDate と厳密一致＝既存挙動を変えない（後方互換）。
+  out.selfRetireAge = defaultRetireAge(
+    out.selfBirth as string,
+    out.selfRetireDate as string,
+  );
   if (defaulted.length > 0 && onDefaulted) onDefaulted(defaulted);
   return out as unknown as SimParams;
 }

@@ -42,6 +42,8 @@ describe("buildSimParams", () => {
     expect(p.selfBirth).toBe("1977-03-09"); // 0 埋め ISO
     expect(p.spouseRetireDate).toBe("2041-06-30");
     expect(p.selfPensionStartAge).toBe(65);
+    // UI スライダー既定: selfBirth=1977/03 + selfRetireDate=2037/03 → 60歳
+    expect(p.selfRetireAge).toBe(60);
   });
 
   it("¥・カンマ付き文字列も数値化", () => {
