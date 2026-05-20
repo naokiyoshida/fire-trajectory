@@ -17,6 +17,16 @@
  * 購買力一定）、年金のみ名目固定（pensionReal で÷deflator）。これにより青
  * （期末資産）と橙（I列）が同一の漸化式となり、傾きの振る舞いが整合する
  * （かつて I列だけ支出を÷deflator していた非対称を撤去）。
+ * 入金側の各項目のインフレ扱いも明示しておく：
+ *   - 給与・賞与（selfMonthlyIncome, selfBonusAnnual, spouse同様）: ÷deflator
+ *     しない＝「毎年インフレ連動で名目昇給する」を暗黙仮定。設定シートの
+ *     値は「現時点の実質購買力での給与」と解釈する。
+ *   - 退職一時金（selfRetireLump, spouseRetireLump）: ÷deflator する＝
+ *     退職月の名目額として入力する想定（ねんきん定期便等の参考値）。
+ *   - 年金（selfPensionAnnual, spousePensionAnnual）: ÷deflator する＝
+ *     名目額固定で実質目減りする仮定（日本の年金は概ね固定）。
+ * 給与のみ昇給仮定なのは利便性のためで、毎年シート更新せずに長期予測した時に
+ * 過小評価しないようにするため。この前提はドキュメント §4.1 に明記する。
  * FIRE可能時期は「その月に退職した場合、年金のみ・退職後支出・一時金なしで
  * 前進シミュした終了年齢資産が fireTargetRemain 以上になる最初の月」。
  * I列の意味（到達＝その月に辞めれば成立）と厳密に一致し、就労プランの
@@ -125,9 +135,13 @@ function monthIndex(y: number, m: number): number {
 
 /**
  * selfRetireDate（＋本人誕生日）から UI スライダー既定の退職年齢を導く。
- * simulate の年齢パス `monthIndex(birth.y+age, birth.m)` の逆写像で、
- * 誕生月＝退職日の月の通常ケースは厳密一致（端数年はその年に丸め）。
- * ロジックを engine 内に置き写像と逆写像のドリフトを不能にする。
+ * simulate の年齢パス `monthIndex(birth.y+age, birth.m)` の逆写像。
+ *
+ * 誕生月＝退職日の月の通常ケース（実シート値: 1977/03 生・2037/03 退職 等）は
+ * 厳密一致＝ずれ 0 月。誕生月と退職日の月がずれている場合は Math.floor で
+ * 「早めの退職」へ丸める＝最大 11ヶ月の前倒し（FIRE 評価は保守側に倒れる）。
+ * Math.round だと半年で挙動が反転して両方向にずれるが、Math.floor なら常に
+ * 単調（早期側）で UI スライダー操作の予測可能性が高い。
  */
 export function defaultRetireAge(
   selfBirthIso: string,
@@ -135,7 +149,7 @@ export function defaultRetireAge(
 ): number {
   const b = parseYmd(selfBirthIso);
   const r = parseYmd(selfRetireDateIso);
-  return Math.round(
+  return Math.floor(
     (monthIndex(r.y, r.m) - monthIndex(b.y, b.m)) / 12,
   );
 }
@@ -330,6 +344,9 @@ export function simulate(p: SimParams): SimResult {
   // FIRE可能時期 = その前進シミュが fireTargetRemain 以上になる最初の月。
   // 就労プランの E列がこの後 I列を割り込んでも（働き続けて退職予定日に辞めた
   // 場合の軌道の話なので）「その月に辞める」判断とは無関係。初接触で確定する。
+  // `r.fireNeed === null` の月（＝ageSelf > fireTargetAge）は探索対象から除く：
+  // 目標年齢を超えてから初めて条件を満たすケースは「目標年齢までに FIRE 可能」
+  // という指標の意味から外れるため、fireDate は null（未達）扱いとする。
   let fireDate: string | null = null;
   let ageAtFire: number | null = null;
   let fireIdx = -1;

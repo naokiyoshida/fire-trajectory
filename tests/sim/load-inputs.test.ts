@@ -53,6 +53,14 @@ describe("buildSimParams", () => {
     expect(buildSimParams(rows, "2026-05-01").currentAssets).toBe(28_980_000);
   });
 
+  it("科学表記 (Sheets API が大数で返すケース) も数値化", () => {
+    // 1.5e3 のような e を含む文字列で e を落とすと 1.53 になる回帰。
+    const rows = FULL.map((r) =>
+      r[0] === "現在の資産" ? [r[0], "1.5e7"] : r,
+    );
+    expect(buildSimParams(rows, "2026-05-01").currentAssets).toBe(15_000_000);
+  });
+
   it("必須項目欠落は項目名つきで例外", () => {
     const rows = FULL.filter((r) => r[0] !== "インフレ率");
     expect(() => buildSimParams(rows, "2026-05-01")).toThrow("インフレ率");

@@ -307,6 +307,11 @@ var PROFILE = "__PROFILE_DEFAULT__";
           hd.className = "sld-group"; hd.textContent = s.group;
           box.appendChild(hd);
         }
+        // 初期値が SliderDef.min/max を逸脱していたら範囲内へ丸めて params にも反映。
+        // input range は表示はクリップするが value 属性経由で超過値を保持し続け、
+        // 最初の simulate が範囲外で走る経路があるので、ここで一度きり clamp する。
+        var v0 = Math.min(Math.max(params[s.key], s.min), s.max);
+        if (v0 !== params[s.key]) params[s.key] = v0;
         var wrap = document.createElement("div"); wrap.className = "sld";
         var lab = document.createElement("label");
         var name = document.createElement("span"); name.textContent = s.label;
@@ -317,7 +322,8 @@ var PROFILE = "__PROFILE_DEFAULT__";
         inp.type = "range"; inp.min = s.min; inp.max = s.max;
         inp.step = s.step; inp.value = params[s.key];
         inp.addEventListener("input", function () {
-          params[s.key] = parseFloat(inp.value);
+          var v = parseFloat(inp.value);
+          params[s.key] = Math.min(Math.max(v, s.min), s.max);
           val.textContent = fmt(params[s.key], s.unit);
           recompute();
         });

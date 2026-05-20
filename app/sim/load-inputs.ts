@@ -58,10 +58,12 @@ function toNum(v: unknown): number {
   if (typeof v === "number") return v;
   // NFKC で全角数字（０-９）・全角記号（￥，）等を半角化してから不要記号を除去。
   // これを怠ると全角金額が Number("")→0 に黙って化け、資産/月収が 0 になる。
+  // 指数表記 (1.5e3 等) も Sheets API が UNFORMATTED_VALUE で大きな数を
+  // 科学表記で返してくる場合があるため e/E を残す（除去すると 1.5e3→1.53）。
   const s = String(v ?? "")
     .normalize("NFKC")
     .replace(/[−ー]/g, "-"); // 全角マイナス/長音→ASCII ハイフン
-  const n = Number(s.replace(/[^\d.\-]/g, ""));
+  const n = Number(s.replace(/[^\deE.+\-]/g, ""));
   return Number.isFinite(n) ? n : 0;
 }
 
