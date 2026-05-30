@@ -21,6 +21,10 @@
     border-radius: 10px; background: #e8f4fd; border: 1px solid #bcdffb;
     margin-bottom: 16px; line-height: 1.65; }
   .headline.warn { background: #fdecec; border-color: #f3c4c4; }
+  .divinfo { font-size: 13px; color: var(--muted); margin: -8px 0 16px;
+    padding: 9px 14px; background: #f0f7f0; border: 1px solid #d6e8d6;
+    border-radius: 9px; line-height: 1.6; }
+  .divinfo b { color: #2e7d32; font-weight: 600; font-variant-numeric: tabular-nums; }
   .wrap { display: flex; flex-wrap: wrap; gap: 24px; align-items: flex-start; }
   .chartbox { flex: 2 1 560px; min-width: 300px; position: relative; }
   .panel { flex: 1 1 320px; min-width: 280px; background: var(--card);
@@ -72,6 +76,7 @@
   <div class="gen">生成: __GENERATED_AT__ ・ ローカル計算（外部送信なし）</div>
 </header>
 <div id="headline" class="headline">—</div>
+<div id="divinfo" class="divinfo"></div>
 <div class="wrap">
   <div class="chartbox">
     <canvas id="chart" width="900" height="380"></canvas>
@@ -328,6 +333,26 @@ var PROFILE = "__PROFILE_DEFAULT__";
     }
   }
 
+  // 分配金リアリティチェック: 年額の概算（dividendYield×資産・グロス）と
+  // 基本生活費に対するカバー率。「分配で生活費」戦略の妥当性を可視化する
+  // （残りは年金＋資産取り崩しで充当）。退職時アンカーはエンジンが返す
+  // res.assetsAtRetire / res.retireYm を使い、退職月を UI で再計算しない。
+  function dividendInfo(res) {
+    var el = document.getElementById("divinfo");
+    var dy = params.dividendYield || 0;
+    var living = params.baseLivingMonthly * 12;
+    if (dy <= 0 || living <= 0) { el.style.display = "none"; return; }
+    el.style.display = "block";
+    var man = function (v) { return (v / 10000).toFixed(1); }; // 円→万円(0.1万単位)
+    var pct = function (v) { return Math.round((v / living) * 100); };
+    var divNow = dy * params.currentAssets;
+    var divRet = dy * res.assetsAtRetire;
+    el.innerHTML =
+      "分配金（年額・概算グロス）: 現在 <b>¥" + man(divNow) + "万</b>（基本生活費の約" +
+      pct(divNow) + "%） → 退職時" + res.retireYm + " <b>¥" + man(divRet) + "万</b>（約" +
+      pct(divRet) + "%）。残りは年金＋資産取り崩しで充当（増配で分配は年々増加）。";
+  }
+
   function dumpTable(res) {
     var lines = ["年月\t本人\t期首\t収入\t支出\t収支\t期末\tFIRE必要\t実質係数\t年金実質"];
     res.monthly.forEach(function (r) {
@@ -342,7 +367,7 @@ var PROFILE = "__PROFILE_DEFAULT__";
   function recompute() {
     var res = simulate(params);
     lastRes = res;
-    draw(res); headline(res); dumpTable(res);
+    draw(res); headline(res); dividendInfo(res); dumpTable(res);
   }
 
   function renderSliders() {

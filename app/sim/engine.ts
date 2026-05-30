@@ -165,6 +165,10 @@ export interface SimResult {
   fireEndAssets: number | null;
   /** 余裕度。fireDate があれば fireEndAssets で判定し fireDate と矛盾しない */
   verdict: "盤石" | "余裕" | "達成" | "未達";
+  /** 本人の退職月 "YYYY/MM"（UI の分配金カバー率など表示用アンカー）。 */
+  retireYm: string;
+  /** 退職月の期末資産（退職時の概算ネストエッグ）。UI 表示用。 */
+  assetsAtRetire: number;
 }
 
 /** "YYYY/MM/DD" or "YYYY/M/D" or ISO を {y,m,d} に。 */
@@ -442,6 +446,13 @@ export function simulate(p: SimParams): SimResult {
     else verdict = "未達";
   }
 
+  // 退職時アンカー（UI の分配金カバー率表示用）。selfRetireIdx の月の期末資産＝
+  // 退職時の概算ネストエッグ。範囲外（過去に退職/ホライズン超過）は端にクランプ。
+  // エンジンを唯一の正とし、template 側で退職月を再計算しない（重複・ドリフト防止）。
+  const retireT = Math.min(Math.max(selfRetireIdx - startIdx, 0), totalMonths - 1);
+  const assetsAtRetire = rows[retireT]?.endAssets ?? p.currentAssets;
+  const retireYm = ymLabel(selfRetireIdx);
+
   return {
     monthly: rows,
     fireDate,
@@ -450,5 +461,7 @@ export function simulate(p: SimParams): SimResult {
     endAssetsAtSimEnd,
     fireEndAssets,
     verdict,
+    retireYm,
+    assetsAtRetire,
   };
 }

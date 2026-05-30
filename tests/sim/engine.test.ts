@@ -107,6 +107,11 @@ describe("simulate", () => {
     expect(r.verdict).not.toBe("未達"); // fireDate があれば未達にならない
   });
 
+  it("退職時アンカー: retireYm=2027/01・assetsAtRetire=退職月の期末資産", () => {
+    expect(r.retireYm).toBe("2027/01");
+    expect(r.assetsAtRetire).toBe(12_300_000); // m[12].endAssets（退職月）
+  });
+
   it("決定的（同入力→同出力）", () => {
     expect(JSON.stringify(simulate(P))).toBe(JSON.stringify(r));
   });
