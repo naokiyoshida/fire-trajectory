@@ -84,6 +84,11 @@ async function scrapeRowsFromPage(
         amountText = (cells[2]?.textContent ?? "").trim();
       }
 
+      // TODO(次回ログイン取得時): 手入力取引で金融機関欄が <select> のとき
+      // textContent が全 option を連結する（取引履歴 4446/4447 の "なし/インテグレ
+      // /なし"）。実支払い方法は MF に登録されているはずなので selectedIndex の
+      // option を読めば本当の値が取れる可能性が高い。実 DOM を確認し、select なら
+      // sel.options[sel.selectedIndex] を採用する分岐を入れる（"なし" は暫定仮値）。
       let sourceText = "";
       for (const s of sel.cell.source) {
         const el = row.querySelector(s);
