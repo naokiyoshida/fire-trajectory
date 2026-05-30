@@ -179,7 +179,7 @@ function filterAndShape(rows: RawRow[], year: number, month: number): RawTransac
       date,
       content: r.content,
       amount: cleanAmount(r.amount),
-      source: r.source,
+      source: cleanSource(r.source),
       category,
     };
 
@@ -198,6 +198,18 @@ function filterAndShape(rows: RawRow[], year: number, month: number): RawTransac
 
 export function cleanAmount(raw: string): string {
   return raw.replace(/[,円\s]/g, "").replace(/\(振替\)/g, "");
+}
+
+/**
+ * 保有金融機関セルの正規化。MF の手入力（口座未連携）取引では金融機関欄が
+ * select となり、textContent に "なし\n\n\nインテグレ (…)\nなし" のように全
+ * option ラベルが改行ごと連結されて入ることがある（実例: 取引履歴 4446/4447）。
+ * 内部の連続空白・改行を単一スペースに畳み前後を trim して、生の改行が
+ * シートへ流入するのを防ぐ。通常の金融機関名は内部に連続空白を持たないため
+ * 値（＝自然キー/ID）は不変で、既存行との互換が保たれる。
+ */
+export function cleanSource(raw: string): string {
+  return raw.replace(/\s+/g, " ").trim();
 }
 
 export function parseDateMatch(raw: string): { month: number; day: number } | null {
