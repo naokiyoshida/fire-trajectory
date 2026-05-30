@@ -24,6 +24,7 @@ export interface SliderDef {
     | "inflation"
     | "dividendYield"
     | "nisaRatio"
+    | "foreignDivShare"
     | "baseLivingMonthly"
     | "loanMonthly"
     | "childSupportMonthly"
@@ -86,6 +87,19 @@ export const SLIDERS: SliderDef[] = [
     // （資産割合ではなく「分配のうち NISA 割合」で与えるのが正確・engine §4.1a）。
     key: "nisaRatio",
     label: "NISA比率(分配の非課税割合)",
+    min: 0,
+    max: 1,
+    step: 0.05,
+    unit: "%",
+    profiles: ["detailed"],
+    group: "市場前提",
+  },
+  {
+    // 分配金のうち外国源泉（米株配当など）の割合。NISA 分でも外国源泉税(≒10%)は
+    // 回収できず恒久ドラッグになる（engine §4.1a）。米株 ETF・米株比率の高い投信を
+    // 多く持つほど大きい。NISA比率100%でも消えない数少ない実コストを表す。
+    key: "foreignDivShare",
+    label: "分配の外国源泉割合(米株等)",
     min: 0,
     max: 1,
     step: 0.05,

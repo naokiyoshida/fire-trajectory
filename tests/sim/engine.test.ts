@@ -387,3 +387,66 @@ describe("simulate: 分配金課税ドラッグ（NISA 差別化）", () => {
     );
   });
 });
+
+// 外国源泉ドラッグ（§4.1a）。NISA 口座分の分配は国内非課税でも外国源泉税(米株≒10%)
+// は回収できず恒久ドラッグになる。NISA100% でも foreignDivShare>0 なら効くのが要点。
+describe("simulate: 外国源泉ドラッグ（NISA でも回収不能・§4.1a）", () => {
+  const Pg: SimParams = { ...P, nominalYield: 0.05 };
+  const DOMESTIC = 0.20315;
+  const FOREIGN = 0.1;
+
+  it("foreignDivShare=0 は外国源泉ドラッグ無し＝従来モデルと一致（後方互換）", () => {
+    expect(
+      JSON.stringify(
+        simulate({ ...Pg, dividendYield: 0.03, nisaRatio: 1, foreignDivShare: 0 }),
+      ),
+    ).toBe(JSON.stringify(simulate(Pg)));
+  });
+
+  it("NISA100%でも外国源泉ぶんはドラッグが残る（実効名目=0.05−分配×NISA×外国×0.10）", () => {
+    const r = simulate({ ...Pg, dividendYield: 0.03, nisaRatio: 1, foreignDivShare: 0.8 });
+    const effNom = 0.05 - 0.03 * 1 * 0.8 * FOREIGN;
+    const rmExpect = Math.pow((1 + effNom) / (1 + Pg.inflation), 1 / 12) - 1;
+    expect(r.monthly[0]?.realMonthlyYield).toBeCloseTo(rmExpect, 12);
+  });
+
+  it("国内ドラッグと外国ドラッグは加算される（特定50%・NISA50%・外国8割）", () => {
+    const r = simulate({ ...Pg, dividendYield: 0.03, nisaRatio: 0.5, foreignDivShare: 0.8 });
+    const effNom = 0.05 - (0.03 * 0.5 * DOMESTIC + 0.03 * 0.5 * 0.8 * FOREIGN);
+    const rmExpect = Math.pow((1 + effNom) / (1 + Pg.inflation), 1 / 12) - 1;
+    expect(r.monthly[0]?.realMonthlyYield).toBeCloseTo(rmExpect, 12);
+  });
+
+  it("外国源泉割合が高いほど NISA 資産でも期末は下がる（単調）", () => {
+    const end = (f: number) =>
+      simulate({ ...Pg, dividendYield: 0.03, nisaRatio: 1, foreignDivShare: f })
+        .endAssetsAtSimEnd;
+    expect(end(1)).toBeLessThan(end(0.5));
+    expect(end(0.5)).toBeLessThan(end(0));
+  });
+
+  it("特定口座100%(nisaRatio=0)は外国源泉割合に依らない（外国税額控除で回収＝国内率のみ）", () => {
+    const at0 = simulate({ ...Pg, dividendYield: 0.03, nisaRatio: 0, foreignDivShare: 0 })
+      .endAssetsAtSimEnd;
+    const at1 = simulate({ ...Pg, dividendYield: 0.03, nisaRatio: 0, foreignDivShare: 1 })
+      .endAssetsAtSimEnd;
+    expect(at0).toBe(at1);
+  });
+
+  it("foreignDivShare は 0..1 にクランプ（範囲外入力でも破綻しない）", () => {
+    expect(
+      simulate({ ...Pg, dividendYield: 0.03, nisaRatio: 1, foreignDivShare: 5 })
+        .endAssetsAtSimEnd,
+    ).toBe(
+      simulate({ ...Pg, dividendYield: 0.03, nisaRatio: 1, foreignDivShare: 1 })
+        .endAssetsAtSimEnd,
+    );
+    expect(
+      simulate({ ...Pg, dividendYield: 0.03, nisaRatio: 1, foreignDivShare: -2 })
+        .endAssetsAtSimEnd,
+    ).toBe(
+      simulate({ ...Pg, dividendYield: 0.03, nisaRatio: 1, foreignDivShare: 0 })
+        .endAssetsAtSimEnd,
+    );
+  });
+});

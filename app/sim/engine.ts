@@ -28,11 +28,16 @@
  * 給与のみ昇給仮定なのは利便性のためで、毎年シート更新せずに長期予測した時に
  * 過小評価しないようにするため。この前提はドキュメント §4.1 に明記する。
  * 【§4.1a 分配金課税】総リターン nominalYield のうち分配（配当）として毎年実現
- * する分 dividendYield には、課税口座割合 (1−nisaRatio) ぶん国内 20.315% が課税
- * される。値上がり益は売却まで非課税繰延なのでドラッグ対象外。実装は実効名目
- * を nominalYield−dividendYield×(1−nisaRatio)×0.20315 として rm を一本化し、
- * 青(期末資産)・橙(I列)・前進シミュすべてに同一 rm を効かせる（整合維持）。
- * NISA 比率 100% または分配 0 でドラッグ 0＝従来モデルに一致。
+ * する分 dividendYield に、口座種別で非対称な税ドラッグを引く。
+ *   - 課税(特定)口座分 (1−nisaRatio): 国内 20.315%（外国分は外国税額控除で
+ *     外国源泉を回収でき≒国内税率に収束するので国内率のみで近似）。
+ *   - NISA 口座分 nisaRatio: 国内は非課税だが外国源泉(米株≒10%)は回収不可で残る。
+ *     分配のうち外国源泉割合 foreignDivShare ぶんに FOREIGN_DIV_WHT を課す。
+ * 値上がり益は売却まで非課税繰延なのでドラッグ対象外。実効名目を
+ * nominalYield − 分配×[(1−nisaRatio)×0.20315 + nisaRatio×foreignDivShare×0.10]
+ * として rm を一本化し、青(期末資産)・橙(I列)・前進シミュすべてに同一 rm を
+ * 効かせる（整合維持）。分配 0、または NISA 比率 100%×外国源泉 0% でドラッグ 0
+ * ＝従来の総リターン1本モデルに一致（後方互換）。
  * FIRE可能時期は「その月に退職した場合、年金のみ・退職後支出・一時金なしで
  * 前進シミュした終了年齢資産が fireTargetRemain 以上になる最初の月」。
  * I列の意味（到達＝その月に辞めれば成立）と厳密に一致し、就労プランの
@@ -45,10 +50,17 @@
 
 /**
  * 上場株式等の配当・譲渡益にかかる国内税率（所得税15%＋復興2.1%＋住民5%）。
- * NISA（非課税口座）はこの国内課税が非課税。外国源泉（米株 ≒10% 等）は NISA でも
- * 引かれるが v1 では未モデル化（必要なら後で foreignWithholding を足す）。
+ * NISA（非課税口座）はこの国内課税が非課税。
  */
 const DOMESTIC_DIV_TAX = 0.20315;
+
+/**
+ * 外国源泉徴収税率（米株配当に対する日米租税条約の標準税率 ≒10%）。
+ * 特定口座なら外国税額控除で概ね取り戻せるが、NISA は控除すべき国内税が無いため
+ * 回収不能で恒久ドラッグになる（§4.1a）。米株 ETF・米株比率の高い投信を NISA で
+ * 持つほど効く。簡略化として一律 10%（実際は二重課税ファンド等で増減しうる）。
+ */
+const FOREIGN_DIV_WHT = 0.1;
 
 export interface SimParams {
   /** シミュレーション開始月（YYYY-MM-DD、月初扱い）。通常は実行日。 */
@@ -79,6 +91,13 @@ export interface SimParams {
    * 口座種別から設定する（MF ポートフォリオ画面には口座種別が出ないため手入力）。
    */
   nisaRatio?: number;
+  /**
+   * 任意。分配金のうち外国源泉（米株配当など）の割合（0..1）。NISA 口座分の分配は
+   * 国内非課税だが外国源泉税（≒10%）は回収できず恒久ドラッグになる（§4.1a）。
+   * その外国源泉ぶんを効かせる係数。未指定なら 0＝外国源泉ドラッグなし（後方互換）。
+   * 米株 ETF・米株比率の高い投信を多く持つほど大きい（実値は保有明細から設定）。
+   */
+  foreignDivShare?: number;
   fireSolidThreshold: number;
   fireComfortThreshold: number;
   fireTargetAge: number;
@@ -231,14 +250,18 @@ export function simulate(p: SimParams): SimResult {
   const childEndIdx = monthIndex(childEnd.y, childEnd.m);
 
   // 分配金課税ドラッグ（§4.1a）。総リターン nominalYield のうち分配として毎年
-  // 実現する分（dividendYield）に、課税口座割合 (1−nisaRatio) ぶんだけ国内
-  // 20.315% を課税し、その分だけ実効の名目リターンを下げる。値上がり益は売却
-  // まで非課税繰延なのでドラッグ対象外。NISA 比率 100% またはdividendYield 0 で
-  // ドラッグ 0＝従来の総リターン1本モデルと一致（後方互換）。
+  // 実現する分（dividendYield）に、口座種別で非対称な税を引く。課税(特定)口座分
+  // (1−nisaRatio) は国内 20.315%、NISA 口座分 nisaRatio は国内非課税だが外国源泉
+  // (米株≒10%)が回収不能で残る（分配のうち外国源泉割合 foreignDivShare ぶん）。
+  // 値上がり益は売却まで非課税繰延なのでドラッグ対象外。分配 0、または
+  // NISA100%×外国源泉0% でドラッグ 0＝従来の総リターン1本モデルと一致（後方互換）。
   const dividendYield = p.dividendYield ?? 0;
   const nisaRatio = Math.min(Math.max(p.nisaRatio ?? 0, 0), 1);
-  const taxDrag = dividendYield * (1 - nisaRatio) * DOMESTIC_DIV_TAX;
-  const effectiveNominal = p.nominalYield - taxDrag;
+  const foreignDivShare = Math.min(Math.max(p.foreignDivShare ?? 0, 0), 1);
+  const taxableDrag = dividendYield * (1 - nisaRatio) * DOMESTIC_DIV_TAX;
+  const nisaForeignDrag =
+    dividendYield * nisaRatio * foreignDivShare * FOREIGN_DIV_WHT;
+  const effectiveNominal = p.nominalYield - taxableDrag - nisaForeignDrag;
 
   // フィッシャー方程式: 年実質 → 月実質
   const rYear = (1 + effectiveNominal) / (1 + p.inflation) - 1;
