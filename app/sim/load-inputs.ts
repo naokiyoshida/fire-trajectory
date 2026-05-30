@@ -33,6 +33,11 @@ const MAP: ReadonlyArray<
   ["退職後社会保険料_月額", "postRetireInsuranceMonthly", "num", 0],
   ["運用利回り_名目", "nominalYield", "num"],
   ["インフレ率", "inflation", "num"],
+  // 分配金課税モデル（engine §4.1a）。既存シートに行が無いことがあるため任意
+  // （既定 0＝税ドラッグなし＝従来の総リターン1本モデルと一致）。実値は次回
+  // ログインの保有明細から設定する。
+  ["分配金利回り", "dividendYield", "num", 0],
+  ["NISA比率", "nisaRatio", "num", 0],
   ["FIRE射程_盤石閾値", "fireSolidThreshold", "num"],
   ["FIRE射程_余裕閾値", "fireComfortThreshold", "num"],
   ["FIRE必要資産_目標年齢", "fireTargetAge", "num"],

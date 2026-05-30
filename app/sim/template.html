@@ -5,63 +5,95 @@
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>FIRE シミュレーション</title>
 <style>
-  :root { color-scheme: light dark; }
-  body { font-family: system-ui, sans-serif; margin: 0; padding: 16px; }
-  h1 { font-size: 18px; margin: 0 0 4px; }
-  .gen { color: #888; font-size: 12px; margin-bottom: 12px; }
-  .headline { font-size: 20px; font-weight: 700; padding: 10px 12px;
-    border-radius: 8px; background: #e1f5fe; margin-bottom: 12px; }
-  .headline.warn { background: #ffe0e0; }
-  .wrap { display: flex; flex-wrap: wrap; gap: 20px; align-items: flex-start; }
-  .panel { flex: 1 1 280px; min-width: 260px; }
-  .chartbox { flex: 2 1 520px; min-width: 300px; position: relative; }
-  canvas { width: 100%; height: 360px; border: 1px solid #ccc; border-radius: 6px;
+  :root {
+    color-scheme: light;
+    --bg: #f5f6f8; --card: #ffffff; --text: #1f2933; --muted: #6b7280;
+    --border: #e3e6ea; --blue: #1565c0; --orange: #e65100;
+  }
+  * { box-sizing: border-box; }
+  body { font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+    margin: 0 auto; max-width: 1280px; padding: 20px;
+    background: var(--bg); color: var(--text); line-height: 1.5; }
+  header { margin-bottom: 14px; }
+  h1 { font-size: 19px; margin: 0; letter-spacing: .02em; }
+  .gen { color: var(--muted); font-size: 12px; margin-top: 3px; }
+  .headline { font-size: 15px; font-weight: 600; padding: 13px 16px;
+    border-radius: 10px; background: #e8f4fd; border: 1px solid #bcdffb;
+    margin-bottom: 16px; line-height: 1.65; }
+  .headline.warn { background: #fdecec; border-color: #f3c4c4; }
+  .wrap { display: flex; flex-wrap: wrap; gap: 24px; align-items: flex-start; }
+  .chartbox { flex: 2 1 560px; min-width: 300px; position: relative; }
+  .panel { flex: 1 1 320px; min-width: 280px; background: var(--card);
+    border: 1px solid var(--border); border-radius: 12px; padding: 16px;
+    box-shadow: 0 1px 3px rgba(16,24,40,.04); }
+  canvas { width: 100%; height: 380px; background: var(--card);
+    border: 1px solid var(--border); border-radius: 10px;
     display: block; touch-action: none; }
   #tip { position: absolute; display: none; pointer-events: none;
-    background: rgba(33,33,33,.92); color: #fff; font-size: 12px;
-    padding: 6px 8px; border-radius: 4px; line-height: 1.4; white-space: nowrap;
-    z-index: 5; }
-  .sld { margin: 10px 0; }
-  .sld label { display: flex; justify-content: space-between;
-    font-size: 13px; margin-bottom: 2px; }
-  .sld input[type=range] { width: 100%; }
-  .sld .val { font-variant-numeric: tabular-nums; font-weight: 600; }
-  .sld-group { font-size: 12px; font-weight: 700; color: #555;
-    margin: 14px 0 4px; padding-bottom: 2px; border-bottom: 1px solid #ddd;
-    letter-spacing: .04em; }
-  .sld-group:first-child { margin-top: 0; }
-  .profiles { margin-bottom: 8px; font-size: 13px; }
-  .legend { font-size: 12px; margin-top: 6px; }
-  .legend .b { color: #1565c0; } .legend .o { color: #e65100; }
-  button { margin-top: 10px; font-size: 13px; padding: 4px 8px; }
+    background: rgba(31,41,51,.94); color: #fff; font-size: 12px;
+    padding: 6px 9px; border-radius: 6px; line-height: 1.45; white-space: nowrap;
+    z-index: 5; box-shadow: 0 2px 8px rgba(0,0,0,.18); }
+  .legend { font-size: 12px; margin-top: 8px; color: var(--muted); line-height: 1.7; }
+  .legend .b { color: var(--blue); font-weight: 600; }
+  .legend .o { color: var(--orange); font-weight: 600; }
+  .profiles { margin-bottom: 12px; font-size: 13px; display: flex;
+    align-items: center; gap: 12px; }
+  .profiles label { display: inline-flex; align-items: center; gap: 4px; cursor: pointer; }
+  .sld { margin: 12px 0; }
+  .sld-head { display: flex; justify-content: space-between; align-items: center;
+    gap: 8px; margin-bottom: 5px; }
+  .sld-head .name { font-size: 13px; }
+  .sld-head .field { display: flex; align-items: baseline; gap: 4px; white-space: nowrap; }
+  .sld-head .num { width: 76px; text-align: right; font-size: 13px; font-weight: 600;
+    font-variant-numeric: tabular-nums; padding: 3px 6px; color: var(--text);
+    border: 1px solid var(--border); border-radius: 6px; background: #fff; }
+  .sld-head .num:focus { outline: none; border-color: #90caf9;
+    box-shadow: 0 0 0 2px rgba(144,202,249,.5); }
+  .sld-head .unit { font-size: 12px; color: var(--muted); min-width: 1.4em; }
+  .sld input[type=range] { width: 100%; accent-color: var(--blue); margin: 2px 0 0; }
+  .sld .ticks { display: flex; justify-content: space-between; font-size: 10px;
+    color: #9aa1a9; margin-top: 1px; font-variant-numeric: tabular-nums; }
+  .sld-group { font-size: 11px; font-weight: 700; color: var(--muted);
+    margin: 18px 0 6px; padding-bottom: 4px; border-bottom: 1px solid var(--border);
+    letter-spacing: .08em; }
+  .sld-group:first-child { margin-top: 4px; }
+  .actions { display: flex; gap: 8px; margin-top: 16px; }
+  button { font-size: 13px; padding: 6px 12px; border: 1px solid var(--border);
+    background: #fff; color: var(--text); border-radius: 8px; cursor: pointer; }
+  button:hover { background: #eef1f4; }
+  #dbgBtn { margin-top: 10px; }
   pre { max-height: 240px; overflow: auto; background: #f3f3f3;
-    font-size: 11px; padding: 8px; display: none; }
+    font-size: 11px; padding: 8px; border-radius: 6px; display: none; margin-top: 8px; }
 </style>
 </head>
 <body>
-<h1>FIRE シミュレーション</h1>
-<div class="gen">生成: __GENERATED_AT__ / ローカル計算（外部送信なし）</div>
+<header>
+  <h1>FIRE シミュレーション</h1>
+  <div class="gen">生成: __GENERATED_AT__ ・ ローカル計算（外部送信なし）</div>
+</header>
 <div id="headline" class="headline">—</div>
 <div class="wrap">
   <div class="chartbox">
-    <canvas id="chart" width="900" height="360"></canvas>
+    <canvas id="chart" width="900" height="380"></canvas>
     <div id="tip"></div>
     <div class="legend">
-      <span class="b">■ 期末資産（このまま働き続けた予想）</span>
-      <span class="o">■ FIRE必要資産（働かなくても目標年齢まで持つ最低額）</span>
-      緑＝FIRE可能時期 / 赤＝資産枯渇 / グラフにマウスを乗せると各月の値
+      <span class="b">― 期末資産（このまま働き続けた予想）</span><br>
+      <span class="o">― FIRE必要資産（働かなくても目標年齢まで持つ最低額）</span><br>
+      緑＝FIRE可能時期 / 赤＝資産枯渇 ・ グラフにカーソルを乗せると各月の値
     </div>
     <button id="dbgBtn" type="button">デバッグ表を表示/非表示</button>
     <pre id="dbg"></pre>
   </div>
   <div class="panel">
     <div class="profiles">
-      表示:
+      <span>表示:</span>
       <label><input type="radio" name="prof" value="simple"> シンプル</label>
       <label><input type="radio" name="prof" value="detailed" checked> 詳細</label>
     </div>
     <div id="sliders"></div>
-    <button id="resetBtn" type="button">初期値に戻す</button>
+    <div class="actions">
+      <button id="resetBtn" type="button">初期値に戻す</button>
+    </div>
   </div>
 </div>
 
@@ -88,6 +120,24 @@ var PROFILE = "__PROFILE_DEFAULT__";
     if (unit === "歳") return v + "歳";
     return Math.round(v).toLocaleString() + "円";
   }
+  // 数値直接入力欄は「表示単位」で扱う（%なら 5.0=5%、万円なら 35.5=35.5万）。
+  // スライダーと params は常に内部値（生）。toDisp/fromDisp が両者を相互変換する。
+  function toDisp(v, unit) {
+    if (unit === "%") return Math.round(v * 1000) / 10;     // 0.05 -> 5.0
+    if (unit === "万円") return Math.round(v / 100) / 100;   // 355000 -> 35.5
+    return v;                                                // 歳 / 円
+  }
+  function fromDisp(x, unit) {
+    if (unit === "%") return x / 100;
+    if (unit === "万円") return x * 10000;
+    return x;
+  }
+  function dispStep(unit, rawStep) {
+    if (unit === "%") return Math.round(rawStep * 100000) / 1000; // 0.001 -> 0.1
+    if (unit === "万円") return rawStep / 10000;                   // 5000 -> 0.5
+    return rawStep;                                               // 歳:1
+  }
+  function unitShort(unit) { return unit === "万円" ? "万" : unit; }
   function yen(v) { return "¥" + Math.round(v).toLocaleString(); }
   // Y 軸目盛りラベル（億 / 万）
   function moneyLabel(v) {
@@ -312,22 +362,65 @@ var PROFILE = "__PROFILE_DEFAULT__";
         // 最初の simulate が範囲外で走る経路があるので、ここで一度きり clamp する。
         var v0 = Math.min(Math.max(params[s.key], s.min), s.max);
         if (v0 !== params[s.key]) params[s.key] = v0;
+
         var wrap = document.createElement("div"); wrap.className = "sld";
-        var lab = document.createElement("label");
-        var name = document.createElement("span"); name.textContent = s.label;
-        var val = document.createElement("span"); val.className = "val";
-        val.textContent = fmt(params[s.key], s.unit);
-        lab.appendChild(name); lab.appendChild(val);
-        var inp = document.createElement("input");
-        inp.type = "range"; inp.min = s.min; inp.max = s.max;
-        inp.step = s.step; inp.value = params[s.key];
-        inp.addEventListener("input", function () {
-          var v = parseFloat(inp.value);
-          params[s.key] = Math.min(Math.max(v, s.min), s.max);
-          val.textContent = fmt(params[s.key], s.unit);
+
+        // 見出し行: 名称 + 数値直接入力欄 + 単位
+        var head = document.createElement("div"); head.className = "sld-head";
+        var name = document.createElement("span"); name.className = "name";
+        name.textContent = s.label;
+        var field = document.createElement("span"); field.className = "field";
+        var num = document.createElement("input");
+        num.type = "number"; num.className = "num";
+        num.min = toDisp(s.min, s.unit); num.max = toDisp(s.max, s.unit);
+        num.step = dispStep(s.unit, s.step);
+        num.value = toDisp(params[s.key], s.unit);
+        var unit = document.createElement("span"); unit.className = "unit";
+        unit.textContent = unitShort(s.unit);
+        field.appendChild(num); field.appendChild(unit);
+        head.appendChild(name); head.appendChild(field);
+
+        // スライダー本体
+        var rng = document.createElement("input");
+        rng.type = "range"; rng.min = s.min; rng.max = s.max;
+        rng.step = s.step; rng.value = params[s.key];
+
+        // 範囲ヒント（min / max を表示単位で）
+        var ticks = document.createElement("div"); ticks.className = "ticks";
+        var tlo = document.createElement("span");
+        tlo.textContent = toDisp(s.min, s.unit) + unitShort(s.unit);
+        var thi = document.createElement("span");
+        thi.textContent = toDisp(s.max, s.unit) + unitShort(s.unit);
+        ticks.appendChild(tlo); ticks.appendChild(thi);
+
+        // 内部値を範囲内へ収め、params 反映＋再計算。収めた値を返す。
+        function apply(raw) {
+          raw = Math.min(Math.max(raw, s.min), s.max);
+          params[s.key] = raw;
           recompute();
+          return raw;
+        }
+        // スライダー操作 → 数値欄を追従
+        rng.addEventListener("input", function () {
+          num.value = toDisp(apply(parseFloat(rng.value)), s.unit);
         });
-        wrap.appendChild(lab); wrap.appendChild(inp); box.appendChild(wrap);
+        // 数値直接入力 → スライダーを追従（入力中は欄の表示はそのまま、
+        // 確定時=change で範囲内へ正規化表示）
+        num.addEventListener("input", function () {
+          var x = parseFloat(num.value);
+          if (!isFinite(x)) return;
+          rng.value = apply(fromDisp(x, s.unit));
+        });
+        num.addEventListener("change", function () {
+          var x = parseFloat(num.value);
+          if (!isFinite(x)) { num.value = toDisp(params[s.key], s.unit); return; }
+          var raw = apply(fromDisp(x, s.unit));
+          rng.value = raw;
+          num.value = toDisp(raw, s.unit);
+        });
+
+        wrap.appendChild(head); wrap.appendChild(rng); wrap.appendChild(ticks);
+        box.appendChild(wrap);
       });
   }
 

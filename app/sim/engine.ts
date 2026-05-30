@@ -27,6 +27,12 @@
  *     名目額固定で実質目減りする仮定（日本の年金は概ね固定）。
  * 給与のみ昇給仮定なのは利便性のためで、毎年シート更新せずに長期予測した時に
  * 過小評価しないようにするため。この前提はドキュメント §4.1 に明記する。
+ * 【§4.1a 分配金課税】総リターン nominalYield のうち分配（配当）として毎年実現
+ * する分 dividendYield には、課税口座割合 (1−nisaRatio) ぶん国内 20.315% が課税
+ * される。値上がり益は売却まで非課税繰延なのでドラッグ対象外。実装は実効名目
+ * を nominalYield−dividendYield×(1−nisaRatio)×0.20315 として rm を一本化し、
+ * 青(期末資産)・橙(I列)・前進シミュすべてに同一 rm を効かせる（整合維持）。
+ * NISA 比率 100% または分配 0 でドラッグ 0＝従来モデルに一致。
  * FIRE可能時期は「その月に退職した場合、年金のみ・退職後支出・一時金なしで
  * 前進シミュした終了年齢資産が fireTargetRemain 以上になる最初の月」。
  * I列の意味（到達＝その月に辞めれば成立）と厳密に一致し、就労プランの
@@ -36,6 +42,13 @@
  * 判定するので両者は常に整合する。これにより engine はレガシー GAS シミュとは
  * 設計上意図的に乖離する（engine が唯一の正・GAS シミュは撤去対象）。
  */
+
+/**
+ * 上場株式等の配当・譲渡益にかかる国内税率（所得税15%＋復興2.1%＋住民5%）。
+ * NISA（非課税口座）はこの国内課税が非課税。外国源泉（米株 ≒10% 等）は NISA でも
+ * 引かれるが v1 では未モデル化（必要なら後で foreignWithholding を足す）。
+ */
+const DOMESTIC_DIV_TAX = 0.20315;
 
 export interface SimParams {
   /** シミュレーション開始月（YYYY-MM-DD、月初扱い）。通常は実行日。 */
@@ -50,6 +63,19 @@ export interface SimParams {
   postRetireInsuranceMonthly: number;
   nominalYield: number;
   inflation: number;
+  /**
+   * 任意。総リターン（nominalYield）のうち分配金（配当）として毎年実現する
+   * 利回り（資産に対する割合、例 0.03＝3%）。未指定/0 なら税ドラッグなし＝
+   * 従来の総リターン1本モデルと完全一致。課税口座にある分配だけが
+   * 20.315% 課税され実効リターンを押し下げる（§4.1a）。
+   */
+  dividendYield?: number;
+  /**
+   * 任意。資産のうち NISA（非課税口座）にある割合（0..1）。NISA 分の分配は
+   * 国内課税が非課税なので税ドラッグの対象外。未指定なら 0（全額課税口座扱い
+   * ＝最も保守的）。実値は次回ログインの保有明細から設定する。
+   */
+  nisaRatio?: number;
   fireSolidThreshold: number;
   fireComfortThreshold: number;
   fireTargetAge: number;
@@ -201,8 +227,18 @@ export function simulate(p: SimParams): SimResult {
   const loanEndIdx = monthIndex(loanEnd.y, loanEnd.m);
   const childEndIdx = monthIndex(childEnd.y, childEnd.m);
 
+  // 分配金課税ドラッグ（§4.1a）。総リターン nominalYield のうち分配として毎年
+  // 実現する分（dividendYield）に、課税口座割合 (1−nisaRatio) ぶんだけ国内
+  // 20.315% を課税し、その分だけ実効の名目リターンを下げる。値上がり益は売却
+  // まで非課税繰延なのでドラッグ対象外。NISA 比率 100% またはdividendYield 0 で
+  // ドラッグ 0＝従来の総リターン1本モデルと一致（後方互換）。
+  const dividendYield = p.dividendYield ?? 0;
+  const nisaRatio = Math.min(Math.max(p.nisaRatio ?? 0, 0), 1);
+  const taxDrag = dividendYield * (1 - nisaRatio) * DOMESTIC_DIV_TAX;
+  const effectiveNominal = p.nominalYield - taxDrag;
+
   // フィッシャー方程式: 年実質 → 月実質
-  const rYear = (1 + p.nominalYield) / (1 + p.inflation) - 1;
+  const rYear = (1 + effectiveNominal) / (1 + p.inflation) - 1;
   const rm = Math.pow(1 + rYear, 1 / 12) - 1;
 
   // ホライズン: 本人が max(終了年齢, FIRE目標年齢) に達する月まで

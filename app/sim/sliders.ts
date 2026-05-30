@@ -22,6 +22,8 @@ export interface SliderDef {
     keyof SimParams,
     | "nominalYield"
     | "inflation"
+    | "dividendYield"
+    | "nisaRatio"
     | "baseLivingMonthly"
     | "loanMonthly"
     | "childSupportMonthly"
@@ -51,7 +53,7 @@ export const SLIDERS: SliderDef[] = [
     label: "運用利回り(名目)",
     min: 0,
     max: 0.1,
-    step: 0.005,
+    step: 0.001,
     unit: "%",
     profiles: ["simple", "detailed"],
     group: "市場前提",
@@ -61,9 +63,33 @@ export const SLIDERS: SliderDef[] = [
     label: "インフレ率",
     min: 0,
     max: 0.05,
-    step: 0.005,
+    step: 0.001,
     unit: "%",
     profiles: ["simple", "detailed"],
+    group: "市場前提",
+  },
+  {
+    // 総リターンのうち分配（配当）で実現する利回り。課税口座分だけ 20.315%
+    // 課税され実効リターンを下げる（engine §4.1a）。範囲は暫定（次回ログインの
+    // 実保有から確定予定）。NISA比率と組で効く。
+    key: "dividendYield",
+    label: "分配金利回り(課税)",
+    min: 0,
+    max: 0.05,
+    step: 0.001,
+    unit: "%",
+    profiles: ["detailed"],
+    group: "市場前提",
+  },
+  {
+    // 資産のうち NISA（非課税）にある割合。100%で分配課税ドラッグが消える。
+    key: "nisaRatio",
+    label: "NISA比率(非課税)",
+    min: 0,
+    max: 1,
+    step: 0.05,
+    unit: "%",
+    profiles: ["detailed"],
     group: "市場前提",
   },
   // ── 生活費・支出 ──
@@ -72,7 +98,7 @@ export const SLIDERS: SliderDef[] = [
     label: "基本生活費(月)",
     min: 200000,
     max: 600000,
-    step: 10000,
+    step: 5000,
     unit: "万円",
     profiles: ["simple", "detailed"],
     group: "生活費・支出",
@@ -82,7 +108,7 @@ export const SLIDERS: SliderDef[] = [
     label: "ローン月額",
     min: 0,
     max: 300000,
-    step: 10000,
+    step: 5000,
     unit: "万円",
     profiles: ["detailed"],
     group: "生活費・支出",
@@ -92,7 +118,7 @@ export const SLIDERS: SliderDef[] = [
     label: "息子支援 月額",
     min: 0,
     max: 200000,
-    step: 10000,
+    step: 5000,
     unit: "万円",
     profiles: ["detailed"],
     group: "生活費・支出",
@@ -113,7 +139,7 @@ export const SLIDERS: SliderDef[] = [
     label: "本人 月収(家計入金)",
     min: 0,
     max: 600000,
-    step: 10000,
+    step: 5000,
     unit: "万円",
     profiles: ["detailed"],
     group: "本人",
@@ -123,7 +149,7 @@ export const SLIDERS: SliderDef[] = [
     label: "本人 賞与年額(家計入金)",
     min: 0,
     max: 3000000,
-    step: 100000,
+    step: 50000,
     unit: "万円",
     profiles: ["detailed"],
     group: "本人",
@@ -133,7 +159,7 @@ export const SLIDERS: SliderDef[] = [
     label: "本人 年金年額",
     min: 0,
     max: 4000000,
-    step: 100000,
+    step: 10000,
     unit: "万円",
     profiles: ["detailed"],
     group: "本人",
@@ -154,7 +180,7 @@ export const SLIDERS: SliderDef[] = [
     label: "配偶者 年金年額",
     min: 0,
     max: 4000000,
-    step: 100000,
+    step: 10000,
     unit: "万円",
     profiles: ["detailed"],
     group: "配偶者",
