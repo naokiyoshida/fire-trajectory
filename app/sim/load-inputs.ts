@@ -33,11 +33,17 @@ const MAP: ReadonlyArray<
   ["退職後社会保険料_月額", "postRetireInsuranceMonthly", "num", 0],
   ["運用利回り_名目", "nominalYield", "num"],
   ["インフレ率", "inflation", "num"],
-  // 分配金課税モデル（engine §4.1a）。既存シートに行が無いことがあるため任意
-  // （既定 0＝税ドラッグなし＝従来の総リターン1本モデルと一致）。実値は次回
-  // ログインの保有明細から設定する。
-  ["分配金利回り", "dividendYield", "num", 0],
-  ["NISA比率", "nisaRatio", "num", 0],
+  // 分配金課税モデル（engine §4.1a）。これらは銘柄構成で固定なので設定シート
+  // （ユーザー編集対象）ではなくここを既定とし、実態を正しく表示する。
+  // 2026-05 の保有明細実測:
+  //   - 分配を出す VIG/EDV/SBI日本高配当/SBI・V米国高配当 は全額 NISA →
+  //     NISA比率=1.0（国内分配課税ドラッグ 0）。
+  //   - 分配金利回り=0.011（課税分配 ≒324千円/年 ÷ 総資産29.25M、総資産比）。
+  //     NISA=100% のため projection には効かない表示用の値。
+  // 設定シートに同名行があればそちらが優先（将来 特定口座に積む等で上書き可能）。
+  // リバランスで NISA 配分が変わったら再算定すること。
+  ["分配金利回り", "dividendYield", "num", 0.011],
+  ["NISA比率", "nisaRatio", "num", 1.0],
   ["FIRE射程_盤石閾値", "fireSolidThreshold", "num"],
   ["FIRE射程_余裕閾値", "fireComfortThreshold", "num"],
   ["FIRE必要資産_目標年齢", "fireTargetAge", "num"],

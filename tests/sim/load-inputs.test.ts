@@ -46,10 +46,11 @@ describe("buildSimParams", () => {
     expect(p.selfRetireAge).toBe(60);
   });
 
-  it("分配金利回り・NISA比率はシート未掲載なら既定0（税ドラッグなし＝従来一致）", () => {
+  it("分配金利回り・NISA比率はシート未掲載なら保有実測の既定（1.1% / NISA100%）", () => {
+    // 銘柄構成で固定の値をコード既定にして実態を表示する（設定シートには書かない）。
     const p = buildSimParams(FULL, "2026-05-01");
-    expect(p.dividendYield).toBe(0);
-    expect(p.nisaRatio).toBe(0);
+    expect(p.dividendYield).toBe(0.011);
+    expect(p.nisaRatio).toBe(1.0);
   });
 
   it("分配金利回り・NISA比率が設定にあればパースする", () => {
