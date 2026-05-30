@@ -82,9 +82,10 @@ export const SLIDERS: SliderDef[] = [
     group: "市場前提",
   },
   {
-    // 資産のうち NISA（非課税）にある割合。100%で分配課税ドラッグが消える。
+    // 分配金のうち NISA（非課税）で受け取る割合。100%で分配課税ドラッグが消える
+    // （資産割合ではなく「分配のうち NISA 割合」で与えるのが正確・engine §4.1a）。
     key: "nisaRatio",
-    label: "NISA比率(非課税)",
+    label: "NISA比率(分配の非課税割合)",
     min: 0,
     max: 1,
     step: 0.05,
