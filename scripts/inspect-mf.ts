@@ -212,10 +212,94 @@ async function cfSelect(): Promise<void> {
   });
 }
 
+/**
+ * 任意 URL のテーブル・リンク・口座種別文言をダンプ（口座一覧/口座詳細調査用）。
+ */
+async function dumpPage(url: string): Promise<void> {
+  await withPage(async (page) => {
+    await page.goto(url, { waitUntil: "domcontentloaded" });
+    await page.waitForLoadState("networkidle", { timeout: 15000 }).catch(() => {});
+    await page.waitForTimeout(2500);
+
+    const data = await page.evaluate(() => {
+      const links = Array.from(document.querySelectorAll("a[href]"))
+        .map((a) => ({
+          text: (a.textContent || "").trim().replace(/\s+/g, " ").slice(0, 40),
+          href: a.getAttribute("href") || "",
+        }))
+        .filter(
+          (l) =>
+            l.text &&
+            (/\/accounts\/show|\/bs\//.test(l.href) ||
+              /証券|銀行|NISA|特定|口座/.test(l.text)),
+        );
+      const hits: string[] = [];
+      const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
+      let n: Node | null;
+      while ((n = walker.nextNode())) {
+        const tx = (n.nodeValue || "").trim();
+        if (/NISA|特定預り|特定口座|一般預り|つみたて|成長投資枠/.test(tx)) {
+          hits.push(tx.replace(/\s+/g, " ").slice(0, 60));
+        }
+      }
+      const tables: Array<{ cls: string; heading: string; headers: string[]; rows: string[][] }> = [];
+      for (const t of Array.from(document.querySelectorAll("table"))) {
+        if (/table-condensed/.test(t.className)) continue;
+        let heading = "";
+        let node: Element | null = t;
+        while (node && !heading) {
+          let sib: Element | null = node.previousElementSibling;
+          while (sib) {
+            if (/^h[1-4]$/.test(sib.tagName.toLowerCase()) || /heading|title/i.test(sib.className)) {
+              heading = (sib.textContent || "").trim().replace(/\s+/g, " ");
+              break;
+            }
+            sib = sib.previousElementSibling;
+          }
+          node = node.parentElement;
+        }
+        const headers = Array.from(t.querySelectorAll("thead th, thead td")).map((e) =>
+          (e.textContent || "").trim().replace(/\s+/g, " "),
+        );
+        const rows = Array.from(t.querySelectorAll("tbody tr"))
+          .slice(0, 40)
+          .map((r) =>
+            Array.from(r.querySelectorAll("th, td")).map((e) =>
+              (e.textContent || "").trim().replace(/\s+/g, " ").slice(0, 40),
+            ),
+          );
+        tables.push({ cls: t.className || "", heading: heading.slice(0, 50), headers, rows });
+      }
+      return { url: location.href, links, hits: [...new Set(hits)].slice(0, 40), tables };
+    });
+
+    console.log("URL:", data.url);
+    console.log("=== 口座種別の文言ヒット ===");
+    for (const h of data.hits) console.log("  •", h);
+    console.log("\n=== リンク（口座詳細候補） ===");
+    for (const l of data.links) console.log(`  ${l.text}  ->  ${l.href}`);
+    console.log("\n=== テーブル ===");
+    for (const t of data.tables) {
+      console.log(`\n.${t.cls} | 見出し: ${t.heading} | ${t.rows.length}行`);
+      if (t.headers.length) console.log("  列:", t.headers.join(" | "));
+      t.rows.forEach((r, i) => console.log(`  [${i}]`, r.join(" | ")));
+    }
+  });
+}
+
 const mode = process.argv[2];
-const run = mode === "portfolio" ? portfolio : mode === "cf-select" ? cfSelect : null;
+const run =
+  mode === "portfolio"
+    ? portfolio
+    : mode === "cf-select"
+      ? cfSelect
+      : mode === "accounts"
+        ? () => dumpPage("https://moneyforward.com/accounts")
+        : mode === "url"
+          ? () => dumpPage(process.argv[3] ?? "")
+          : null;
 if (!run) {
-  console.error("usage: npx tsx scripts/inspect-mf.ts <portfolio|cf-select>");
+  console.error("usage: npx tsx scripts/inspect-mf.ts <portfolio|cf-select|accounts|url <href>>");
   process.exit(1);
 }
 run().catch((e) => {
