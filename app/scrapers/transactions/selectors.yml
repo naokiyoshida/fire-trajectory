@@ -19,6 +19,10 @@ cell:
     - ".amount"
   source:
     - ".qt-financial_institution"
+    # 手入力（口座未連携）取引は金融機関欄が select（selected=真の口座 or「なし」）。
+    # 自動連携行には無いので qt-financial_institution の次に試す。extractor が
+    # select を検出したら selectedIndex の option を採用する。
+    - ".sub_account_id_hash"
   category_large:
     - ".qt-large_category"
   category_middle:

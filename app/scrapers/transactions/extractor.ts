@@ -84,21 +84,39 @@ async function scrapeRowsFromPage(
         amountText = (cells[2]?.textContent ?? "").trim();
       }
 
-      // TODO(次回ログイン取得時): 手入力取引で金融機関欄が <select> のとき
-      // textContent が全 option を連結する（取引履歴 4446/4447 の "なし/インテグレ
-      // /なし"）。実支払い方法は MF に登録されているはずなので selectedIndex の
-      // option を読めば本当の値が取れる可能性が高い。実 DOM を確認し、select なら
-      // sel.options[sel.selectedIndex] を採用する分岐を入れる（"なし" は暫定仮値）。
+      // 手入力（口座未連携）取引では金融機関欄が <select>（td.sub_account_id_hash）
+      // で、textContent は全 option を連結してしまう（取引履歴 4446/4447 の
+      // "なし/インテグレ(750,000円)/なし"）。2022/02 の実 DOM 確認で selected
+      // オプション＝真の保有金融機関（当該2件は "なし"）と判明。よって select を
+      // 含むセルは selectedIndex の option を採用する。通常の自動連携行は select が
+      // 無いので textContent のまま（＝従来値・ID 互換）。page.evaluate 内なので
+      // 関数宣言は使わずインラインで処理する（esbuild __name 回避）。
       let sourceText = "";
       for (const s of sel.cell.source) {
         const el = row.querySelector(s);
         if (el) {
-          sourceText = (el.textContent ?? "").trim();
+          const selEl =
+            el.tagName === "SELECT"
+              ? (el as HTMLSelectElement)
+              : el.querySelector("select");
+          if (selEl) {
+            const opt = selEl.options[selEl.selectedIndex];
+            sourceText = (opt?.textContent ?? "").trim();
+          } else {
+            sourceText = (el.textContent ?? "").trim();
+          }
           break;
         }
       }
       if (!sourceText && cells.length > 4) {
-        sourceText = (cells[4]?.textContent ?? "").trim();
+        const c4 = cells[4];
+        const c4sel = c4?.querySelector("select");
+        if (c4sel) {
+          const opt = c4sel.options[c4sel.selectedIndex];
+          sourceText = (opt?.textContent ?? "").trim();
+        } else {
+          sourceText = (c4?.textContent ?? "").trim();
+        }
       }
 
       let categoryLargeText = "";
