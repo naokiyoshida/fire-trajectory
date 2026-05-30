@@ -175,11 +175,15 @@ function setupSettings() {
     '■ 灰色(D列「デフォルト値」)＝初期値の控え(参照用)。' +
     '編集するのは「設定値」(B列) だけにしてください。';
 
-  // 「現在の資産」のデフォルト値: 「資産推移」シートが存在すれば最新の純資産（N列）を参照、
+  // 「現在の資産」のデフォルト値: 「資産推移」シートが存在すれば最新の資産総額（I列）を参照、
   // データが無ければ初期値 25,000,000 を使用。
+  // ※純資産（N列）ではなく資産総額（I列）を使う。sim は住宅ローンを loanMonthly で
+  //   別途「支出」計上するため、純資産（＝資産総額−負債総額）を currentAssets にすると
+  //   ローン残債を「資産から控除」＋「支出で返済」の二重計上になり過度に悲観化する。
+  //   家（未連携＝¥0）は資産に乗らないので、投資可能資産＝資産総額が正しい現在資産の基準。
   const assetsRef = Q(SHEET.ASSETS);
   const currentAssetFormula =
-    '=IFERROR(IF(COUNTA(' + assetsRef + '!A:A)>1, INDEX(' + assetsRef + '!N:N, COUNTA(' + assetsRef + '!A:A)), 25000000), 25000000)';
+    '=IFERROR(IF(COUNTA(' + assetsRef + '!A:A)>1, INDEX(' + assetsRef + '!I:I, COUNTA(' + assetsRef + '!A:A)), 25000000), 25000000)';
 
   // レイアウト定義: セクション見出し { section } と 設定項目 { key, def, desc, fmt }
   // を上から順に並べる。実セル行は描画時に動的決定し、数式は行番号ではなく
@@ -191,7 +195,7 @@ function setupSettings() {
   //   インフレ率 2%（日銀目標 / 直近CPI 2.7〜3.2%）
   const layout = [
     { section: '■ 共通設定（家計全体）' },
-    { key: '現在の資産',                def: currentAssetFormula, desc: '「資産推移」最新の純資産を自動参照（水色＝自動計算。固定したい時だけ数値で上書き）', fmt: 'yen' },
+    { key: '現在の資産',                def: currentAssetFormula, desc: '「資産推移」最新の資産総額を自動参照（ローンは支出側で計上＝二重計上回避。水色＝自動計算。固定したい時だけ数値で上書き）', fmt: 'yen' },
     { key: '基本生活費_月額',           def: 350000,    desc: '住宅ローン・教育費を除く毎月の家計支出。例: 350000（取引履歴 直近12ヶ月実測 ≒ 36万）', fmt: 'yen' },
     { key: 'ローン月額',                def: 100000,    desc: '住宅ローン等の毎月返済額。例: 100000', fmt: 'yen' },
     { key: 'ローン完済予定日',          def: '2042/03/31', desc: 'この日まで「ローン月額」を支出に加算。例: 2042/03/31', fmt: 'date' },
