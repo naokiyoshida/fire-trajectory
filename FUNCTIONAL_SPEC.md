@@ -163,8 +163,9 @@ engine が読む唯一の入力ストア。GAS の `setupSettings()`（旧 `setu
 | 本人 | 本人月収_家計入金 | yen | 300,000（手取り35万のうち30万） |
 | 本人 | 本人ボーナス_年額_家計入金 | yen | 900,000 |
 | 本人 | 本人退職時一時金 | yen | 3,000,000 |
-| 本人 | 本人年金_年額 | yen | 1,800,000（**65歳で受け取る標準額**＝ねんきん定期便の65歳見込額。開始年齢に応じ §4.1b の繰上げ/繰下げ倍率で実額へ換算） |
+| 本人 | 本人年金_年額 | yen | 2,030,616（**60歳まで加入継続した場合の65歳標準額**＝ねんきんネット2026/05/31試算 月169,218円×12。開始年齢で §4.1b の繰上げ/繰下げ倍率、退職が60歳より早ければ §4.1b の早期退職減額で実額へ換算） |
 | 本人 | 本人年金開始年齢 | int | 65（60〜75で繰上げ/繰下げ。年額は §4.1b で自動換算） |
+| 本人 | 早期退職の年金減額_年 | yen | 33,000（任意・既定。退職が60歳より早い1年あたり65歳標準額から減額＝報酬比例の積み上げ停止分。標準推定。§4.1b） |
 | 配偶者 | 配偶者誕生日 | date | 1976/06/27 |
 | 配偶者 | 配偶者退職予定日 | date | 2041/06/30 |
 | 配偶者 | 配偶者月収_家計入金 | yen | 130,000（手取り20万のうち13万） |
@@ -284,6 +285,27 @@ FIRE 関連指標（FIRE可能時期・余裕度等）は Sheets ではなく `d
 `pensionFactor`・`pensionIndexation` とも engine（唯一の正）で計算し、青（期末資産）・
 橙（I列）・前進シミュに同一系列で効かせる（§4.3 の線間整合を保つ）。`0` で従来モデルと一致。
 
+さらに公的年金（厚生年金の報酬比例部分）は**加入期間が長いほど増える**ため、
+**早く退職するほど年金も減る**。`本人年金_年額` は「**60歳まで加入を継続した場合**の
+65歳標準額」（ねんきんネットの「現在の加入条件が60歳まで継続する前提」の試算額）で
+入力し、退職が60歳より早い場合は1年あたり `pensionAccrualPerYear` 円だけ65歳標準額から
+減額する（本人の退職年齢スライダーと連動）:
+
+`本人年金基準額 = max(0, 本人年金_年額 − max(0, 60 − 退職年齢) × pensionAccrualPerYear)`
+
+- 退職年齢は `selfRetireDate`／UI の `本人 退職年齢` スライダーから導く（`selfRetireIdx`
+  と同じ整数年換算。誕生月退職はちょうどその年齢＝誕生日の「日」に依存しない。月次
+  ループ用の `ageAt`〔月初評価で誕生日未到来なら−1〕を流用すると、誕生日が1日でない
+  人の60歳退職を59歳と誤認し1年過剰減額になるため、それは使わない）。
+- 既定 `pensionAccrualPerYear = 33,000`円/年 は標準推定（報酬比例 ≒125万 ÷ 38年加入）。
+  ねんきんネットで複数の退職年齢の見込額を取れば実額で精緻化できる。
+- この減額は `pensionFactor`（繰上げ/繰下げ）より**前**に適用する。
+  実受給 = `本人年金基準額 × pensionFactor(開始年齢)`。配偶者は本減額の対象外（既定 0）。
+- `pensionAccrualPerYear = 0`（または退職60歳以降）で従来モデルと一致＝**後方互換**。
+
+これにより「早期退職＝就労収入も年金も減る」という二重の効きが正しく反映され、
+退職年齢スライダーの感応度が制度実態に沿う。
+
 ### 4.2 ライフイベント制御
 
 「設定」シートの値に基づき、月次キャッシュフローを動的に切り替える。
@@ -382,6 +404,10 @@ FIRE 関連指標（FIRE可能時期・余裕度等）は Sheets ではなく `d
 - **想定寿命の一本化**: `fireTargetAge`（想定寿命）スライダーが I列の地平・FIRE
   判定・グラフ終了年齢（`simEndAge`）を同値に揃え、二重地平の不整合をなくす
   （recompute で `simEndAge = fireTargetAge`）。
+- **グラフ追従（sticky）**: グラフboxを `position: sticky; top: 12px` で固定し、
+  下方のスライダー（本人・配偶者・市場前提）を操作中も結果グラフが画面上部に
+  残って見える。スライダーが多くスクロールが必要なため、見ながら動かせるよう
+  にした（`.chartbox` の CSS のみ・JS 不要）。
 - CLI: `npm run sim`（読み取り専用で `dist/fire.html` 生成、`dist/` は
   gitignore）。`npm run sync` 末尾でも best-effort 生成（失敗しても sync は
   落とさない）。
@@ -486,7 +512,7 @@ profile`）で定義し、`profile` で `detailed`(PC) と `simple`(将来スマ
 
 ## 7. テスト戦略
 
-vitest による純関数ユニットテスト 131本:
+vitest による純関数ユニットテスト 136本:
 - `tests/scrapers/transactions/transformer.test.ts`: SHA256 ID 生成、category 非依存、occurrence 採番、重複排除
 - `tests/scrapers/transactions/extractor.test.ts`: 金額クリーニング、日付パース
 - `tests/scrapers/transactions/navigator.test.ts`: 月送りロジック、ヘッダー判定
@@ -498,7 +524,7 @@ vitest による純関数ユニットテスト 131本:
 - `tests/pipeline/sync-transactions.test.ts`: Full Sync の月数計算
 - `tests/pipeline/append-guard.test.ts`: 追記前ガード（増分で過半数新規＝二重追記疑いを中止）
 - `tests/pipeline/diagnose-transactions.test.ts`: `doctor` 診断（重複ID・旧 run 重複・最新 run の保存ID vs 再計算ID 一致率）
-- `tests/sim/engine.test.ts`: エンジン（実質利回り・収支ゲート・資産漸化式・I列の fireNeedValue 一致・自己整合の不変条件・ageAt 誕生日境界・フィッシャー実質・枯渇/verdict・決定性・年金の繰上げ/繰下げ pensionFactor・物価スライド pensionIndexation・配偶者退職年齢 spouseRetireAge）
+- `tests/sim/engine.test.ts`: エンジン（実質利回り・収支ゲート・資産漸化式・I列の fireNeedValue 一致・自己整合の不変条件・ageAt 誕生日境界・フィッシャー実質・枯渇/verdict・決定性・年金の繰上げ/繰下げ pensionFactor・物価スライド pensionIndexation・早期退職の年金減額 pensionAccrualPerYear・配偶者退職年齢 spouseRetireAge）
 - `tests/sim/load-inputs.test.ts`: 設定シート→SimParams（型別パース・任意項目の既定補完・必須欠落例外）
 - `tests/sim/render-html.test.ts`: engine の transpile（型/export 除去）とトークン置換
 - `tests/gas/contract.test.ts`: GAS↔Node 契約（quoteSheetName_/dashLookup_ テンプレ一致・旧キー移行・fireNeedValue 算術）

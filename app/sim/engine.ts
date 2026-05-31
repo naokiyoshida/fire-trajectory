@@ -338,11 +338,15 @@ export function simulate(p: SimParams): SimResult {
   // 65歳基準額そのものが減る。退職1年前倒しあたり pensionAccrualPerYear 円 減
   // （selfPensionAnnual は「60歳まで加入した場合の65歳基準額」）。本人のみ適用。
   const accrual = Math.max(p.pensionAccrualPerYear ?? 0, 0);
-  const selfRetireAgeEff = ageAt(
-    selfBirth,
-    Math.floor(selfRetireIdx / 12),
-    (selfRetireIdx % 12) + 1,
-  );
+  // 退職年齢は selfRetireIdx と同じ流儀（スライダー値／日付の floor 換算）で取る。
+  // ageAt で selfRetireIdx を逆算してはいけない: ageAt は月次ループ用に「月初時点」
+  // で評価し、誕生日が月内未到来なら −1 する規約のため、誕生月退職（実データ:
+  // 1977/03 生・2037/03 退職＝ちょうど 60 歳）を 59 歳と誤認し earlyYears が 1 年
+  // 過剰＝満額前提の 60 歳退職なのに 33,000 円 誤減額になる（誕生日が 1 日でない
+  // 全ケースで 1 年過剰）。selfRetireAge は整数スライダー、defaultRetireAge も
+  // Math.floor 整数なので earlyYears も整数年。
+  const selfRetireAgeEff =
+    p.selfRetireAge ?? defaultRetireAge(p.selfBirth, p.selfRetireDate);
   const earlyYears = Math.max(0, 60 - selfRetireAgeEff);
   const selfPensionBase = Math.max(0, p.selfPensionAnnual - earlyYears * accrual);
   // (b) 繰上げ/繰下げ倍率。

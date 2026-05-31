@@ -595,4 +595,18 @@ describe("simulate: 早期退職による年金減額（§4.1b）", () => {
       )?.pensionReal,
     ).toBeCloseTo(2_000_000 / 12, 4);
   });
+  // 回帰: 退職年齢を ageAt で月初評価すると、誕生日が月初(1日)でない実データ
+  // （1977/03/09 生・2037/03 退職＝ちょうど60歳）を1歳若く誤認し earlyYears が
+  // 1年過剰になっていた。退職年齢はスライダー値/日付の floor 換算で取り、誕生日の
+  // 「日」に依存しないことを保証する（60歳=満額・55歳=ちょうど5年）。
+  it("誕生日が月初でなくても退職年齢は正しい（ageAt 月初規約の巻き込み回帰防止）", () => {
+    const at = (retireAge: number) =>
+      simulate({
+        ...base,
+        selfBirth: "1960-03-09", // 日=9>1。ageAt 月初規約だと誕生月退職を1歳若く誤認
+        selfRetireAge: retireAge,
+      }).monthly.find((m) => m.ym === "2026/01")?.pensionReal;
+    expect(at(60)).toBeCloseTo(2_000_000 / 12, 4); // 満額（旧: 1,950,000 で誤減額）
+    expect(at(55)).toBeCloseTo((2_000_000 - 250_000) / 12, 4); // 5年（旧: 6年で過剰）
+  });
 });
