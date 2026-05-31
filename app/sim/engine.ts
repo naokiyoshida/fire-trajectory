@@ -37,6 +37,10 @@
  * 「繰下げるほど損」という制度と逆の誤示唆が出る）。さらに名目固定だと 35 年で
  * 実質ほぼ半減し悲観に倒れるため、マクロ経済スライドを模した部分連動を
  * pensionIndexation（0..1）で表す（既定は load-inputs が 0.5 を注入）。
+ * 加えて退職（厚生年金の加入終了）が満額前提の60歳より早いと報酬比例が積み上がらず
+ * 65歳基準額そのものが減る（退職1年前倒しあたり pensionAccrualPerYear 円）。
+ * selfPensionAnnual は「60歳まで加入した場合の65歳基準額」（ねんきんネット前提）と
+ * 解釈する。退職年齢スライダーと連動し早期退職で年金が減る（働く期間＝加入期間）。
  * 【§4.1a 分配金課税】総リターン nominalYield のうち分配（配当）として毎年実現
  * する分 dividendYield に、口座種別で非対称な税ドラッグを引く。
  *   - 課税(特定)口座分 (1−nisaRatio): 国内 20.315%（外国分は外国税額控除で
@@ -135,11 +139,20 @@ export interface SimParams {
   selfBonusAnnual: number;
   selfRetireLump: number;
   /**
-   * 本人年金の「65歳で受け取る標準額（年額）」。開始年齢に応じ pensionFactor で
-   * 繰上げ/繰下げ換算する（§4.1b）。ねんきん定期便の 65 歳見込額を入れる。
+   * 本人年金の「60歳まで加入した場合の65歳標準額（年額）」。ねんきんネットの
+   * 『60歳まで継続』前提の65歳見込額を入れる。開始年齢に応じ pensionFactor で
+   * 繰上げ/繰下げ換算し、退職が60歳より早ければ pensionAccrualPerYear で減額（§4.1b）。
    */
   selfPensionAnnual: number;
   selfPensionStartAge: number;
+  /**
+   * 任意。退職（厚生年金の加入終了）が60歳より早い場合の、退職1年前倒しあたりの
+   * 65歳基準年金の減少額（円・§4.1b）。退職年齢が60歳未満なら
+   * (60−退職年齢)×この額 を selfPensionAnnual から引く。未指定/0 で減額なし
+   * （後方互換）。基礎年金は60歳まで国民年金任意加入で満額維持と仮定し報酬比例を
+   * 近似する係数。ねんきんネットで複数退職年齢の見込額から傾きを取れば精緻化できる。
+   */
+  pensionAccrualPerYear?: number;
   /** 配偶者 */
   spouseBirth: string;
   spouseRetireDate: string;
@@ -318,11 +331,22 @@ export function simulate(p: SimParams): SimResult {
   const rYear = (1 + effectiveNominal) / (1 + p.inflation) - 1;
   const rm = Math.pow(1 + rYear, 1 / 12) - 1;
 
-  // 年金（§4.1b）: 65歳標準額に繰上げ/繰下げ倍率を掛けた実受給額（年額）。
-  // 物価スライド pensionIndexation は月次ループで deflator^(indexation−1) を効かせる。
+  // 年金（§4.1b）: 65歳標準額に (a) 早期退職による加入期間短縮の減額、(b) 繰上げ/
+  // 繰下げ倍率を掛けた実受給額（年額）。物価スライドは月次ループで効かせる。
   const pensionIndexation = Math.min(Math.max(p.pensionIndexation ?? 0, 0), 1);
-  const selfPensionAdj =
-    p.selfPensionAnnual * pensionFactor(p.selfPensionStartAge);
+  // (a) 退職（厚生年金の加入終了）が満額前提の60歳より早いと報酬比例が積み上がらず
+  // 65歳基準額そのものが減る。退職1年前倒しあたり pensionAccrualPerYear 円 減
+  // （selfPensionAnnual は「60歳まで加入した場合の65歳基準額」）。本人のみ適用。
+  const accrual = Math.max(p.pensionAccrualPerYear ?? 0, 0);
+  const selfRetireAgeEff = ageAt(
+    selfBirth,
+    Math.floor(selfRetireIdx / 12),
+    (selfRetireIdx % 12) + 1,
+  );
+  const earlyYears = Math.max(0, 60 - selfRetireAgeEff);
+  const selfPensionBase = Math.max(0, p.selfPensionAnnual - earlyYears * accrual);
+  // (b) 繰上げ/繰下げ倍率。
+  const selfPensionAdj = selfPensionBase * pensionFactor(p.selfPensionStartAge);
   const spousePensionAdj =
     p.spousePensionAnnual * pensionFactor(p.spousePensionStartAge);
 

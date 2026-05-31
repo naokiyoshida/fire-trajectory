@@ -38,6 +38,7 @@ export interface SliderDef {
     | "spousePensionAnnual"
     | "postRetireInsuranceMonthly"
     | "pensionIndexation"
+    | "pensionAccrualPerYear"
     | "fireTargetAge"
   >;
   label: string;
@@ -204,6 +205,19 @@ export const SLIDERS: SliderDef[] = [
     min: 0,
     max: 4000000,
     step: 10000,
+    unit: "万円",
+    profiles: ["detailed"],
+    group: "本人",
+  },
+  {
+    // 早期退職（60歳前）1年あたりの年金減額（報酬比例の積み上げ停止分・§4.1b）。
+    // 退職年齢スライダーと連動し、早く辞めるほど年金が減る（働く期間＝加入期間）。
+    // 既定3.3万は標準推定。ねんきんネットで複数退職年齢の見込額から精緻化可能。
+    key: "pensionAccrualPerYear",
+    label: "早期退職の年金減/年",
+    min: 0,
+    max: 100000,
+    step: 5000,
     unit: "万円",
     profiles: ["detailed"],
     group: "本人",

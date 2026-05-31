@@ -61,10 +61,14 @@ const MAP: ReadonlyArray<
   ["本人月収_家計入金", "selfMonthlyIncome", "num"],
   ["本人ボーナス_年額_家計入金", "selfBonusAnnual", "num"],
   ["本人退職時一時金", "selfRetireLump", "num"],
-  // 年金額は「65歳で受け取る標準額（ねんきん定期便の65歳見込額）」で入力する。
-  // engine が開始年齢に応じ pensionFactor で繰上げ/繰下げ換算する（§4.1b）。
+  // 年金額は「60歳まで加入した場合の65歳標準額（ねんきんネットの60歳継続前提
+  // 見込額）」で入力。engine が開始年齢で繰上げ/繰下げ換算し、退職が60歳より
+  // 早い場合は pensionAccrualPerYear で減額する（§4.1b）。
   ["本人年金_年額", "selfPensionAnnual", "num"],
   ["本人年金開始年齢", "selfPensionStartAge", "num"],
+  // 早期退職（60歳前）1年あたりの年金減額。既定3.3万円は標準推定（報酬比例
+  // ≒125万÷38年）。ねんきんネットで複数退職年齢の見込額から精緻化できる。
+  ["早期退職の年金減額_年", "pensionAccrualPerYear", "num", 33000],
   ["配偶者誕生日", "spouseBirth", "date"],
   ["配偶者退職予定日", "spouseRetireDate", "date"],
   ["配偶者月収_家計入金", "spouseMonthlyIncome", "num"],
