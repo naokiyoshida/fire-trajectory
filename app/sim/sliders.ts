@@ -1,9 +1,20 @@
 /**
  * UI に出すスライダー定義（宣言的・データ駆動）。
  *
+ * 【設計方針】このツールの目的は「現在の状況でいつ FIRE 可能かを見る」こと。
+ * よってスライダーに出すのは “レバー” だけに絞る:
+ *   (a) 本質的に不確実な前提（市場：運用利回り・インフレ率）= ストレステスト対象
+ *   (b) ユーザーが実際に選べる/試したい判断（退職年齢・年金開始年齢・想定寿命・
+ *       基本生活費）。
+ * 現在の状況で “確定している事実”（年金年額・月収/賞与・ローン・息子支援・分配課税の
+ * 保有実測値・年金の前提値など）はスライダーに出さず、設定シート（または engine 既定）
+ * の値をそのまま使う。スライダーから外しても入力自体は消えず計算精度は不変＝純粋な
+ * UI 簡素化（露出していない項目は engine がフル精度で計算に使い続ける）。
+ *
  * engine は常に全 SimParams でフル精度計算する。ここは「どの項目をスライダーに
  * 出すか／範囲／プロファイル／分類」だけを定義する。スライダーの追加・範囲変更・
  * プロファイル変更・分類変更はこの配列の1行編集で済み、engine/UI コードは触らない。
+ * 確定値を一時的に試したくなったら、その項目をこの配列に1行足すだけで復活できる。
  *
  * profile: "simple" = 将来のスマホ向け最小セット, "detailed" = PC 既定。
  * "simple" は "detailed" の部分集合（simple は detailed にも含める）。
@@ -17,29 +28,22 @@ export type SliderProfile = "simple" | "detailed";
 export type SliderGroup = "市場前提" | "生活費・支出" | "本人" | "配偶者";
 
 export interface SliderDef {
-  /** SimParams の数値キー */
+  /**
+   * SimParams の数値キー。レバー（不確実な前提 or 試したい判断）のみを列挙する。
+   * 確定値（年金年額・月収/賞与・ローン・分配課税の実測値・年金前提値など）は
+   * ここに入れず、設定シート/既定の値を engine がそのまま使う（上の設計方針）。
+   */
   key: Extract<
     keyof SimParams,
     | "nominalYield"
     | "inflation"
-    | "dividendYield"
-    | "nisaRatio"
-    | "foreignDivShare"
     | "baseLivingMonthly"
-    | "loanMonthly"
-    | "childSupportMonthly"
+    | "postRetireInsuranceMonthly"
     | "selfRetireAge"
-    | "selfMonthlyIncome"
-    | "selfBonusAnnual"
     | "selfPensionStartAge"
+    | "fireTargetAge"
     | "spouseRetireAge"
     | "spousePensionStartAge"
-    | "selfPensionAnnual"
-    | "spousePensionAnnual"
-    | "postRetireInsuranceMonthly"
-    | "pensionIndexation"
-    | "pensionAccrualPerYear"
-    | "fireTargetAge"
   >;
   label: string;
   min: number;
@@ -53,7 +57,7 @@ export interface SliderDef {
 }
 
 export const SLIDERS: SliderDef[] = [
-  // ── 市場前提 ──
+  // ── 市場前提（本質的に不確実＝ストレステスト対象）──
   {
     key: "nominalYield",
     label: "運用利回り(名目)",
@@ -74,59 +78,9 @@ export const SLIDERS: SliderDef[] = [
     profiles: ["simple", "detailed"],
     group: "市場前提",
   },
-  {
-    // 年金のインフレ連動率（§4.1b）。100%=実質固定（購買力一定）、0%=名目固定
-    // （インフレ分すべて実質目減り）。日本の年金はマクロ経済スライドで部分連動
-    // するため既定50%。低いほど将来年金が実質目減りし FIRE は厳しくなる。
-    key: "pensionIndexation",
-    label: "年金のインフレ連動",
-    min: 0,
-    max: 1,
-    step: 0.05,
-    unit: "%",
-    profiles: ["detailed"],
-    group: "市場前提",
-  },
-  {
-    // 総リターンのうち分配（配当）で実現する利回り。課税口座分だけ 20.315%
-    // 課税され実効リターンを下げる（engine §4.1a）。範囲は暫定（次回ログインの
-    // 実保有から確定予定）。NISA比率と組で効く。
-    key: "dividendYield",
-    label: "分配金利回り(課税)",
-    min: 0,
-    max: 0.05,
-    step: 0.001,
-    unit: "%",
-    profiles: ["detailed"],
-    group: "市場前提",
-  },
-  {
-    // 分配金のうち NISA（非課税）で受け取る割合。100%で分配課税ドラッグが消える
-    // （資産割合ではなく「分配のうち NISA 割合」で与えるのが正確・engine §4.1a）。
-    key: "nisaRatio",
-    label: "NISA比率(分配の非課税割合)",
-    min: 0,
-    max: 1,
-    step: 0.05,
-    unit: "%",
-    profiles: ["detailed"],
-    group: "市場前提",
-  },
-  {
-    // 分配金のうち外国源泉（米株配当など）の割合。NISA 分でも外国源泉税(≒10%)は
-    // 回収できず恒久ドラッグになる（engine §4.1a）。米株 ETF・米株比率の高い投信を
-    // 多く持つほど大きい。NISA比率100%でも消えない数少ない実コストを表す。
-    key: "foreignDivShare",
-    label: "分配の外国源泉割合(米株等)",
-    min: 0,
-    max: 1,
-    step: 0.05,
-    unit: "%",
-    profiles: ["detailed"],
-    group: "市場前提",
-  },
   // ── 生活費・支出 ──
   {
+    // 達成可否の最大レバー。
     key: "baseLivingMonthly",
     label: "基本生活費(月)",
     min: 200000,
@@ -137,28 +91,9 @@ export const SLIDERS: SliderDef[] = [
     group: "生活費・支出",
   },
   {
-    key: "loanMonthly",
-    label: "ローン月額",
-    min: 0,
-    max: 300000,
-    step: 5000,
-    unit: "万円",
-    profiles: ["detailed"],
-    group: "生活費・支出",
-  },
-  {
-    key: "childSupportMonthly",
-    label: "息子支援 月額",
-    min: 0,
-    max: 200000,
-    step: 5000,
-    unit: "万円",
-    profiles: ["detailed"],
-    group: "生活費・支出",
-  },
-  {
     // 退職後に発生する国保・介護保険料の月額（就労中は給与天引きで内包のため
-    // リタイア翌月以降のみ加算・engine §4.2）。通知後に実額へ更新する想定。
+    // リタイア翌月以降のみ加算・engine §4.2）。実額が通知されるまでの暫定見積り
+    // ＝不確実ゆえスライダーで残す（判明したら設定シートへ固定してもよい）。
     key: "postRetireInsuranceMonthly",
     label: "退職後社会保険料(月)",
     min: 0,
@@ -170,6 +105,7 @@ export const SLIDERS: SliderDef[] = [
   },
   // ── 本人 ──
   {
+    // 「いつ FIRE か」そのもの。早く辞めると年金（厚生年金の加入期間）も減る（§4.1b）。
     key: "selfRetireAge",
     label: "本人 退職年齢",
     min: 45,
@@ -180,49 +116,7 @@ export const SLIDERS: SliderDef[] = [
     group: "本人",
   },
   {
-    key: "selfMonthlyIncome",
-    label: "本人 月収(家計入金)",
-    min: 0,
-    max: 600000,
-    step: 5000,
-    unit: "万円",
-    profiles: ["detailed"],
-    group: "本人",
-  },
-  {
-    key: "selfBonusAnnual",
-    label: "本人 賞与年額(家計入金)",
-    min: 0,
-    max: 3000000,
-    step: 50000,
-    unit: "万円",
-    profiles: ["detailed"],
-    group: "本人",
-  },
-  {
-    key: "selfPensionAnnual",
-    label: "本人 年金年額(65歳基準)",
-    min: 0,
-    max: 4000000,
-    step: 10000,
-    unit: "万円",
-    profiles: ["detailed"],
-    group: "本人",
-  },
-  {
-    // 早期退職（60歳前）1年あたりの年金減額（報酬比例の積み上げ停止分・§4.1b）。
-    // 退職年齢スライダーと連動し、早く辞めるほど年金が減る（働く期間＝加入期間）。
-    // 既定3.3万は標準推定。ねんきんネットで複数退職年齢の見込額から精緻化可能。
-    key: "pensionAccrualPerYear",
-    label: "早期退職の年金減/年",
-    min: 0,
-    max: 100000,
-    step: 5000,
-    unit: "万円",
-    profiles: ["detailed"],
-    group: "本人",
-  },
-  {
+    // 繰上げ/繰下げは実際の意思決定（§4.1b の pensionFactor で年額を自動換算）。
     key: "selfPensionStartAge",
     label: "本人 年金開始年齢",
     min: 60,
@@ -258,16 +152,7 @@ export const SLIDERS: SliderDef[] = [
     group: "配偶者",
   },
   {
-    key: "spousePensionAnnual",
-    label: "配偶者 年金年額(65歳基準)",
-    min: 0,
-    max: 4000000,
-    step: 10000,
-    unit: "万円",
-    profiles: ["detailed"],
-    group: "配偶者",
-  },
-  {
+    // 繰上げ/繰下げは本人と独立に設定できる（§4.1b）。
     key: "spousePensionStartAge",
     label: "配偶者 年金開始年齢",
     min: 60,
