@@ -23,10 +23,20 @@
  *     値は「現時点の実質購買力での給与」と解釈する。
  *   - 退職一時金（selfRetireLump, spouseRetireLump）: ÷deflator する＝
  *     退職月の名目額として入力する想定（ねんきん定期便等の参考値）。
- *   - 年金（selfPensionAnnual, spousePensionAnnual）: ÷deflator する＝
- *     名目額固定で実質目減りする仮定（日本の年金は概ね固定）。
+ *   - 年金（selfPensionAnnual, spousePensionAnnual）: 「65歳で受け取る標準額」
+ *     として入力し、(1) 開始年齢の繰上げ/繰下げ倍率 pensionFactor を掛け、
+ *     (2) 物価スライド pensionIndexation（0=名目固定〜1=実質固定）に応じ
+ *     deflator^(indexation−1) を掛ける（§4.1b）。indexation=0 なら従来の
+ *     ÷deflator（名目固定・実質目減り）と一致＝後方互換。
  * 給与のみ昇給仮定なのは利便性のためで、毎年シート更新せずに長期予測した時に
  * 過小評価しないようにするため。この前提はドキュメント §4.1 に明記する。
+ * 【§4.1b 年金の繰上げ/繰下げ・物価スライド】公的年金は受給開始年齢で受給額が
+ * 変わる：繰上げ 0.4%/月 減（60歳=▲24%）、繰下げ 0.7%/月 増（75歳=+84%）。
+ * selfPensionAnnual/spousePensionAnnual は「65歳標準額」で入力し pensionFactor で
+ * 開始年齢に応じた実額へ換算する（年金開始年齢スライダーと連動。これが無いと
+ * 「繰下げるほど損」という制度と逆の誤示唆が出る）。さらに名目固定だと 35 年で
+ * 実質ほぼ半減し悲観に倒れるため、マクロ経済スライドを模した部分連動を
+ * pensionIndexation（0..1）で表す（既定は load-inputs が 0.5 を注入）。
  * 【§4.1a 分配金課税】総リターン nominalYield のうち分配（配当）として毎年実現
  * する分 dividendYield に、口座種別で非対称な税ドラッグを引く。
  *   - 課税(特定)口座分 (1−nisaRatio): 国内 20.315%（外国分は外国税額控除で
@@ -76,6 +86,14 @@ export interface SimParams {
   nominalYield: number;
   inflation: number;
   /**
+   * 任意。年金の物価スライド率（0..1・§4.1b）。年金実質値の月次係数を
+   * deflator^(pensionIndexation−1) とする。0＝名目固定（インフレ分すべて実質
+   * 目減り＝従来挙動・後方互換）、1＝実質固定（購買力一定）、0.5＝半連動
+   * （マクロ経済スライド相当で実質を緩やかに目減り）。未指定なら 0。
+   * 既定の 0.5 は load-inputs が注入する（engine 既定は後方互換の 0）。
+   */
+  pensionIndexation?: number;
+  /**
    * 任意。総リターン（nominalYield）のうち分配金（配当）として毎年実現する
    * 利回り（資産に対する割合、例 0.03＝3%）。未指定/0 なら税ドラッグなし＝
    * 従来の総リターン1本モデルと完全一致。課税口座にある分配だけが
@@ -116,14 +134,25 @@ export interface SimParams {
   selfMonthlyIncome: number;
   selfBonusAnnual: number;
   selfRetireLump: number;
+  /**
+   * 本人年金の「65歳で受け取る標準額（年額）」。開始年齢に応じ pensionFactor で
+   * 繰上げ/繰下げ換算する（§4.1b）。ねんきん定期便の 65 歳見込額を入れる。
+   */
   selfPensionAnnual: number;
   selfPensionStartAge: number;
   /** 配偶者 */
   spouseBirth: string;
   spouseRetireDate: string;
+  /**
+   * 任意。指定時は spouseRetireDate より優先し、配偶者退職を「配偶者が誕生月に
+   * この年齢になる月」で定義する（本人の selfRetireAge と同流儀・UI スライダー用）。
+   * 未指定なら spouseRetireDate を使う（後方互換）。load-inputs が日付から補う。
+   */
+  spouseRetireAge?: number;
   spouseMonthlyIncome: number;
   spouseBonusAnnual: number;
   spouseRetireLump: number;
+  /** 配偶者年金の「65歳標準額（年額）」。selfPensionAnnual と同様 pensionFactor 換算（§4.1b）。 */
   spousePensionAnnual: number;
   spousePensionStartAge: number;
 }
@@ -232,6 +261,20 @@ function ageAt(
   return age;
 }
 
+/**
+ * 公的年金の繰上げ/繰下げによる受給額の倍率（65歳標準受給額=1.0 を基準）。§4.1b。
+ * 制度（2022年4月以降）: 繰上げ 0.4%/月 減（60歳=0.76）、繰下げ 0.7%/月 増
+ * （75歳=1.84）。受給開始は 60〜75 歳に制限されるので外側はクランプする。
+ * selfPensionAnnual/spousePensionAnnual は「65歳で受け取る標準額」で入力し、
+ * 開始年齢スライダーに応じてこの倍率で実受給額へ換算する（連動が無いと
+ * 「繰下げるほど損」という制度と逆の誤示唆になる）。
+ */
+export function pensionFactor(startAge: number): number {
+  const a = Math.min(Math.max(startAge, 60), 75);
+  const months = (a - 65) * 12;
+  return months < 0 ? 1 + months * 0.004 : 1 + months * 0.007;
+}
+
 export function simulate(p: SimParams): SimResult {
   const asOf = parseYmd(p.asOf);
   const selfBirth = parseYmd(p.selfBirth);
@@ -249,7 +292,11 @@ export function simulate(p: SimParams): SimResult {
     p.selfRetireAge != null
       ? monthIndex(selfBirth.y + p.selfRetireAge, selfBirth.m)
       : monthIndex(selfRetire.y, selfRetire.m);
-  const spouseRetireIdx = monthIndex(spouseRetire.y, spouseRetire.m);
+  // 配偶者の退職も本人 selfRetireAge と同流儀で年齢上書きできる（未指定は日付）。
+  const spouseRetireIdx =
+    p.spouseRetireAge != null
+      ? monthIndex(spouseBirth.y + p.spouseRetireAge, spouseBirth.m)
+      : monthIndex(spouseRetire.y, spouseRetire.m);
   const loanEndIdx = monthIndex(loanEnd.y, loanEnd.m);
   const childEndIdx = monthIndex(childEnd.y, childEnd.m);
 
@@ -270,6 +317,14 @@ export function simulate(p: SimParams): SimResult {
   // フィッシャー方程式: 年実質 → 月実質
   const rYear = (1 + effectiveNominal) / (1 + p.inflation) - 1;
   const rm = Math.pow(1 + rYear, 1 / 12) - 1;
+
+  // 年金（§4.1b）: 65歳標準額に繰上げ/繰下げ倍率を掛けた実受給額（年額）。
+  // 物価スライド pensionIndexation は月次ループで deflator^(indexation−1) を効かせる。
+  const pensionIndexation = Math.min(Math.max(p.pensionIndexation ?? 0, 0), 1);
+  const selfPensionAdj =
+    p.selfPensionAnnual * pensionFactor(p.selfPensionStartAge);
+  const spousePensionAdj =
+    p.spousePensionAnnual * pensionFactor(p.spousePensionStartAge);
 
   // ホライズン: 本人が max(終了年齢, FIRE目標年齢) に達する月まで
   const maxAge = Math.max(p.simEndAge, p.fireTargetAge);
@@ -303,11 +358,14 @@ export function simulate(p: SimParams): SimResult {
     if (idx <= spouseRetireIdx)
       income += p.spouseMonthlyIncome + p.spouseBonusAnnual / 12;
 
+    // 年金実質（§4.1b）: 65歳標準額×繰上げ繰下げ倍率（…Adj）を、物価スライド
+    // 係数 deflator^(indexation−1) で実質化。indexation=0 で従来の ÷deflator。
+    const pensionScale = Math.pow(deflator, pensionIndexation - 1);
     let pensionReal = 0;
     if (ageSelf >= p.selfPensionStartAge)
-      pensionReal += p.selfPensionAnnual / 12 / deflator;
+      pensionReal += (selfPensionAdj / 12) * pensionScale;
     if (ageSpouse >= p.spousePensionStartAge)
-      pensionReal += p.spousePensionAnnual / 12 / deflator;
+      pensionReal += (spousePensionAdj / 12) * pensionScale;
     income += pensionReal;
 
     if (idx === selfRetireIdx) income += p.selfRetireLump / deflator;

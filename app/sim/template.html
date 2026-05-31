@@ -245,8 +245,9 @@ var PROFILE = "__PROFILE_DEFAULT__";
     line(function (r) { return r.endAssets; }, "#1565c0");
     line(function (r) { return r.fireNeed; }, "#e65100");
 
-    // 縦マーカー（FIRE可能時期 / 資産枯渇）に日付ラベルを添える
-    function vmark(ym, color, label) {
+    // 縦マーカー（退職 / FIRE可能時期 / 資産枯渇）に日付ラベルを添える。
+    // atBottom=true はラベルを下端に置く（退職線とFIRE/枯渇線の重なりを避ける）。
+    function vmark(ym, color, label, atBottom) {
       for (var j = 0; j < n; j++) {
         if (rows[j].ym === ym) {
           var vx = X(j);
@@ -255,12 +256,15 @@ var PROFILE = "__PROFILE_DEFAULT__";
           ctx.setLineDash([]);
           ctx.fillStyle = color; ctx.font = "11px sans-serif";
           var right = vx > W - 96;
-          ctx.textAlign = right ? "right" : "left"; ctx.textBaseline = "top";
-          ctx.fillText(label, vx + (right ? -4 : 4), padT + 1);
+          ctx.textAlign = right ? "right" : "left";
+          ctx.textBaseline = atBottom ? "bottom" : "top";
+          ctx.fillText(label, vx + (right ? -4 : 4), atBottom ? H - padB - 2 : padT + 1);
           return;
         }
       }
     }
+    // 退職線（本人）はエンジンが返す retireYm を使う＝UI で退職月を再計算しない。
+    if (res.retireYm) vmark(res.retireYm, "#5c6bc0", "退職 " + res.retireYm, true);
     if (res.fireDate) vmark(res.fireDate, "#2e7d32", "FIRE可能 " + res.fireDate);
     if (res.depletionMonth) vmark(res.depletionMonth, "#c62828", "資産枯渇 " + res.depletionMonth);
 
@@ -293,7 +297,8 @@ var PROFILE = "__PROFILE_DEFAULT__";
     if (i !== hoverIdx) { hoverIdx = i; draw(lastRes); }
     var r = lastRes.monthly[i];
     tip.style.display = "block";
-    tip.innerHTML = "<b>" + r.ym + "</b>（本人 " + r.ageSelf + "歳）<br>" +
+    tip.innerHTML = "<b>" + r.ym + "</b>（本人 " + r.ageSelf + "歳 / 配偶者 " +
+      r.ageSpouse + "歳）<br>" +
       "期末資産 " + yen(r.endAssets) + "<br>" +
       "FIRE必要 " + (r.fireNeed == null ? "—" : yen(r.fireNeed));
     var tw = tip.offsetWidth || 150;
@@ -327,9 +332,15 @@ var PROFILE = "__PROFILE_DEFAULT__";
           : "　／現行プラン（就労継続）の終了資産: " + yen(res.endAssetsAtSimEnd));
     } else {
       el.className = "headline warn";
+      var dep = res.depletionMonth, depAge = "";
+      if (dep) {
+        var dm = res.monthly.find(function (x) { return x.ym === dep; });
+        if (dm) depAge = "・本人 " + dm.ageSelf + "歳";
+      }
       el.textContent = "現状の設定では目標年齢までに FIRE 必要資産へ到達しません" +
-        (res.depletionMonth ? "（資産枯渇: " + res.depletionMonth + "）" : "") +
-        "　終了年齢資産: " + yen(res.endAssetsAtSimEnd);
+        (dep ? "（資産枯渇: " + dep + depAge + "）" : "") +
+        "　終了年齢資産: " + yen(res.endAssetsAtSimEnd) +
+        " ／ 生活費・退職年齢・年金開始・想定利回りのスライダーで改善余地を試せます。";
     }
   }
 
@@ -365,6 +376,9 @@ var PROFILE = "__PROFILE_DEFAULT__";
   }
 
   function recompute() {
+    // 二重地平をなくす: FIRE必要資産（I列）の地平 fireTargetAge と、判定・グラフの
+    // 終了年齢 simEndAge を常に一致させる（「想定寿命」スライダー1本で両方動かす）。
+    params.simEndAge = params.fireTargetAge;
     var res = simulate(params);
     lastRes = res;
     draw(res); headline(res); dividendInfo(res); dumpTable(res);

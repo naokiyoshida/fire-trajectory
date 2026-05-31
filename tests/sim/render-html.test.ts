@@ -45,4 +45,17 @@ describe("buildHtml", () => {
     expect(html).toContain('PROFILE = "detailed"');
     expect(html).toContain("function simulate");
   });
+
+  // template.html の手書き JS（描画・スライダー・ツールチップ等）は tsc 対象外。
+  // engine JS と結合した <script> 全体を new Function で構文解析し（DOM は実行
+  // しない）、波括弧/引数の付け忘れ等の構文リグレッションをローカルで閉じる。
+  it("結合した <script> が構文エラーなくパースできる（手書きJSの回帰防止）", () => {
+    const scripts = [...html.matchAll(/<script>([\s\S]*?)<\/script>/g)].map(
+      (m) => m[1] ?? "",
+    );
+    expect(scripts.length).toBeGreaterThan(0);
+    for (const body of scripts) {
+      expect(() => new Function(body)).not.toThrow();
+    }
+  });
 });

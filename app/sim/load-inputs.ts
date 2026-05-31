@@ -33,6 +33,10 @@ const MAP: ReadonlyArray<
   ["退職後社会保険料_月額", "postRetireInsuranceMonthly", "num", 0],
   ["運用利回り_名目", "nominalYield", "num"],
   ["インフレ率", "inflation", "num"],
+  // 年金の物価スライド（engine §4.1b）。0=名目固定〜1=実質固定。日本の年金は
+  // マクロ経済スライドで部分的に物価連動するため既定 0.5（名目固定だと35年で実質
+  // ほぼ半減し過度に悲観）。設定シートに同名行があれば優先。前提値ゆえコード既定。
+  ["年金物価スライド率", "pensionIndexation", "num", 0.5],
   // 分配金課税モデル（engine §4.1a）。これらは銘柄構成で固定なので設定シート
   // （ユーザー編集対象）ではなくここを既定とし、実態を正しく表示する。
   // 2026-05 の保有明細実測:
@@ -57,6 +61,8 @@ const MAP: ReadonlyArray<
   ["本人月収_家計入金", "selfMonthlyIncome", "num"],
   ["本人ボーナス_年額_家計入金", "selfBonusAnnual", "num"],
   ["本人退職時一時金", "selfRetireLump", "num"],
+  // 年金額は「65歳で受け取る標準額（ねんきん定期便の65歳見込額）」で入力する。
+  // engine が開始年齢に応じ pensionFactor で繰上げ/繰下げ換算する（§4.1b）。
   ["本人年金_年額", "selfPensionAnnual", "num"],
   ["本人年金開始年齢", "selfPensionStartAge", "num"],
   ["配偶者誕生日", "spouseBirth", "date"],
@@ -145,6 +151,11 @@ export function buildSimParams(
   out.selfRetireAge = defaultRetireAge(
     out.selfBirth as string,
     out.selfRetireDate as string,
+  );
+  // 配偶者の退職年齢スライダー既定も日付から導出（本人と対称・UI 用・後方互換）。
+  out.spouseRetireAge = defaultRetireAge(
+    out.spouseBirth as string,
+    out.spouseRetireDate as string,
   );
   if (defaulted.length > 0 && onDefaulted) onDefaulted(defaulted);
   return out as unknown as SimParams;

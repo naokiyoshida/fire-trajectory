@@ -32,9 +32,13 @@ export interface SliderDef {
     | "selfMonthlyIncome"
     | "selfBonusAnnual"
     | "selfPensionStartAge"
+    | "spouseRetireAge"
     | "spousePensionStartAge"
     | "selfPensionAnnual"
     | "spousePensionAnnual"
+    | "postRetireInsuranceMonthly"
+    | "pensionIndexation"
+    | "fireTargetAge"
   >;
   label: string;
   min: number;
@@ -67,6 +71,19 @@ export const SLIDERS: SliderDef[] = [
     step: 0.001,
     unit: "%",
     profiles: ["simple", "detailed"],
+    group: "市場前提",
+  },
+  {
+    // 年金のインフレ連動率（§4.1b）。100%=実質固定（購買力一定）、0%=名目固定
+    // （インフレ分すべて実質目減り）。日本の年金はマクロ経済スライドで部分連動
+    // するため既定50%。低いほど将来年金が実質目減りし FIRE は厳しくなる。
+    key: "pensionIndexation",
+    label: "年金のインフレ連動",
+    min: 0,
+    max: 1,
+    step: 0.05,
+    unit: "%",
+    profiles: ["detailed"],
     group: "市場前提",
   },
   {
@@ -138,6 +155,18 @@ export const SLIDERS: SliderDef[] = [
     profiles: ["detailed"],
     group: "生活費・支出",
   },
+  {
+    // 退職後に発生する国保・介護保険料の月額（就労中は給与天引きで内包のため
+    // リタイア翌月以降のみ加算・engine §4.2）。通知後に実額へ更新する想定。
+    key: "postRetireInsuranceMonthly",
+    label: "退職後社会保険料(月)",
+    min: 0,
+    max: 150000,
+    step: 5000,
+    unit: "万円",
+    profiles: ["detailed"],
+    group: "生活費・支出",
+  },
   // ── 本人 ──
   {
     key: "selfRetireAge",
@@ -171,7 +200,7 @@ export const SLIDERS: SliderDef[] = [
   },
   {
     key: "selfPensionAnnual",
-    label: "本人 年金年額",
+    label: "本人 年金年額(65歳基準)",
     min: 0,
     max: 4000000,
     step: 10000,
@@ -189,10 +218,34 @@ export const SLIDERS: SliderDef[] = [
     profiles: ["simple", "detailed"],
     group: "本人",
   },
+  {
+    // 資産を保たせたい目標年齢（想定寿命）。FIRE必要資産ライン・FIRE可能判定・
+    // グラフ終了年齢を兼ねる（engine の fireTargetAge。UI 側で simEndAge も同値に
+    // 揃え二重地平をなくす）。長いほど必要資産が増え FIRE は厳しくなる。
+    key: "fireTargetAge",
+    label: "想定寿命(資産保全)",
+    min: 85,
+    max: 105,
+    step: 1,
+    unit: "歳",
+    profiles: ["detailed"],
+    group: "本人",
+  },
   // ── 配偶者 ──
   {
+    // 配偶者の退職年齢（本人 selfRetireAge と対称）。長く働くほど世帯収入が増える。
+    key: "spouseRetireAge",
+    label: "配偶者 退職年齢",
+    min: 45,
+    max: 75,
+    step: 1,
+    unit: "歳",
+    profiles: ["detailed"],
+    group: "配偶者",
+  },
+  {
     key: "spousePensionAnnual",
-    label: "配偶者 年金年額",
+    label: "配偶者 年金年額(65歳基準)",
     min: 0,
     max: 4000000,
     step: 10000,

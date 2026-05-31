@@ -44,6 +44,8 @@ describe("buildSimParams", () => {
     expect(p.selfPensionStartAge).toBe(65);
     // UI スライダー既定: selfBirth=1977/03 + selfRetireDate=2037/03 → 60歳
     expect(p.selfRetireAge).toBe(60);
+    // 配偶者も対称に導出: spouseBirth=1976/06 + spouseRetireDate=2041/06 → 65歳
+    expect(p.spouseRetireAge).toBe(65);
   });
 
   it("分配金課税パラメータはシート未掲載なら保有実測の既定（1.1% / NISA100% / 外国8割）", () => {
@@ -52,6 +54,10 @@ describe("buildSimParams", () => {
     expect(p.dividendYield).toBe(0.011);
     expect(p.nisaRatio).toBe(1.0);
     expect(p.foreignDivShare).toBe(0.8);
+  });
+
+  it("年金物価スライド率はシート未掲載なら既定0.5（部分連動・§4.1b）", () => {
+    expect(buildSimParams(FULL, "2026-05-01").pensionIndexation).toBe(0.5);
   });
 
   it("分配金課税パラメータが設定にあればパースする", () => {
